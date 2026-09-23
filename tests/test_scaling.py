@@ -116,3 +116,64 @@ def test_community_fast_path_retains_deterministic_partition_with_isolates():
     with_isolate = communities(graph, read_rules())
     assert active == {gid: cid for gid, cid in with_isolate.items() if gid != 9}
     assert with_isolate[9] not in active.values()
+
+
+def test_isolated_records_do_not_switch_exact_intermediaries_to_sampling():
+    graph = nx.path_graph(7, create_using=nx.DiGraph)
+    nx.set_edge_attributes(graph, 5000.0, "sum_kzt")
+    nx.set_edge_attributes(graph, 1, "n_tx")
+    graph.add_nodes_from(range(7, 307))
+    nodes = pd.DataFrame(
+        {
+            "gid": range(307),
+            "depth": [0, 1, 2, 3, 4, 4, 4] + [0] * 300,
+            "is_seed": [True] + [False] * 6 + [True] * 300,
+        }
+    )
+    rules = read_rules() | {"betweenness_exact_max_nodes": 7, "betweenness_samples": 1}
+    actual = compute(graph, nodes, rules).set_index("gid")
+    assert actual.betweenness.to_dict() == pytest.approx(nx.betweenness_centrality(graph))
+    assert actual.loc[3, "betweenness"] > 0
+    assert actual.loc[7:, "priority_score"].eq(0).all()
+
+
+@pytest.mark.parametrize("pivots", [4, 30])
+def test_sampled_pivots_remain_active_and_preserve_full_graph_normalization(pivots):
+    graph = nx.path_graph(30, create_using=nx.DiGraph)
+    nx.set_edge_attributes(graph, 5000.0, "sum_kzt")
+    nx.set_edge_attributes(graph, 1, "n_tx")
+    nodes = pd.DataFrame(
+        {"gid": range(30), "depth": [0] + [1] * 29, "is_seed": [True] + [False] * 29}
+    )
+    rules = read_rules() | {"betweenness_exact_max_nodes": 1, "betweenness_samples": pivots}
+    base = compute(graph, nodes, rules).set_index("gid")
+    graph.add_nodes_from(range(30, 1030))
+    enlarged = pd.concat(
+        [
+            nodes,
+            pd.DataFrame({"gid": range(30, 1030), "depth": 0, "is_seed": True}),
+        ],
+        ignore_index=True,
+    )
+    actual = compute(graph, enlarged, rules).set_index("gid")
+    factor = 29 * 28 / (1029 * 1028)
+    assert actual.loc[:29, "betweenness"].tolist() == pytest.approx(
+        (base.betweenness * factor).tolist()
+    )
+    assert actual.loc[:29, "p_betweenness"].tolist() == base.p_betweenness.tolist()
+    assert actual.loc[30:, "betweenness"].eq(0).all()
+    if pivots == 30:
+        assert actual.betweenness.to_dict() == pytest.approx(nx.betweenness_centrality(graph))
+
+
+def test_pagerank_accuracy_does_not_relax_with_dataset_size():
+    graph = nx.path_graph(30, create_using=nx.DiGraph)
+    nx.set_edge_attributes(graph, 5000.0, "sum_kzt")
+    nx.set_edge_attributes(graph, 1, "n_tx")
+    graph.add_nodes_from(range(30, 1030))
+    nodes = pd.DataFrame(
+        {"gid": range(1030), "depth": [0] + [1] * 29 + [0] * 1000, "is_seed": [True] * 1030}
+    )
+    actual = compute(graph, nodes, read_rules()).set_index("gid")
+    expected = nx.pagerank(graph, weight="sum_kzt", tol=1e-14, max_iter=500)
+    assert sum(abs(actual.loc[gid, "pagerank"] - value) for gid, value in expected.items()) < 1e-7

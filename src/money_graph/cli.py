@@ -4,9 +4,11 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from .demo import create_demo
+from .exports import export_manifest
 from .loader import DataError
 from .pipeline import EXPORTS, analyze, write_result
 
@@ -103,9 +105,17 @@ def main(argv: list[str] | None = None, *, analyze_only: bool = False) -> None:
             create_demo(args.out)
             print(f"Синтетический набор: {args.out}")
         elif args.command == "analyze":
+            started = time.perf_counter()
             result = analyze_inputs(args)
             write_result(result, args.out)
-            print(json.dumps(result["report"], ensure_ascii=False, indent=2))
+            exports = export_manifest(result, args.out)
+            response = result["report"] | {
+                "status": "success",
+                "output_dir": str(args.out.resolve()),
+                "exports": exports,
+                "total_runtime_seconds": round(time.perf_counter() - started, 3),
+            }
+            print(json.dumps(response, ensure_ascii=False, allow_nan=False, indent=2))
         else:
             import uvicorn
 

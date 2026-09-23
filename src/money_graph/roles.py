@@ -42,7 +42,11 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         and row["out_deg"] > 0
         and cfg["transit_ratio_min"] <= ratio <= cfg["transit_ratio_max"]
     ):
-        candidates["transit"] = (1 - abs(ratio - 1) / 0.4) * (
+        # Retain support 1 at balance and at least 0.5 within the configured
+        # interval, including custom bounds wider than the default 0.8–1.2.
+        tolerance = max(abs(cfg["transit_ratio_min"] - 1), abs(cfg["transit_ratio_max"] - 1))
+        balance_support = 1 - 0.5 * abs(ratio - 1) / tolerance if tolerance else 1.0
+        candidates["transit"] = balance_support * (
             0.5 + 0.5 * support(min(row["in_tx"], row["out_tx"]), 3)
         )
     if (
@@ -94,7 +98,11 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     if role == "peripheral" and (row["boundary_censored"] or row["is_seed"] or row["isolated"]):
         evidence = f"Недостаточно наблюдений для роли; плательщиков {row['in_deg']}, получателей {row['out_deg']}."
     if row.get("self_only", False):
-        evidence = "Наблюдаются только самопереводы; связей с другими клиентами нет. Недостаточно данных для роли."
+        evidence = (
+            f"Только самопереводы: {row['self_transfer_tx']} операций, "
+            f"{row['self_transfer_kzt']:,.0f} KZT; внешних связей 0. "
+            "Недостаточно данных для роли."
+        )
     if row["boundary_censored"]:
         evidence += " Граница depth=4: удержание неизвестно."
     elif row["isolated"]:

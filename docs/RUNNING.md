@@ -4,6 +4,19 @@
 Node.js, браузер, GPU, API-ключи и сервер для расчёта не требуются. `analyze.py` —
 тонкая точка входа в тот же пайплайн, который используют CLI и веб-приложение.
 
+**Команда из корня репозитория (одинаковая на всех трёх ОС):**
+
+```text
+uv run --frozen --no-dev python analyze.py --data ./data/data --out ./artifacts
+```
+
+Это законченный запуск: чтение исходных Parquet → проверка данных → метрики,
+роли и кластеры → три CSV → проверка записанных CSV → JSON-ответ в терминале.
+Ручная подготовка графа, отдельный экспорт и запуск веб-сервера не нужны.
+На чистой машине сначала нужен менеджер пакетов uv; он установит Python и
+библиотеки автоматически при выполнении этой команды. Как установить uv и
+какие пути передать для своих файлов, описано ниже.
+
 ## Рекомендуемый путь: uv
 
 Установите [uv по официальной инструкции](https://docs.astral.sh/uv/getting-started/installation/).
@@ -21,29 +34,70 @@ Node.js, браузер, GPU, API-ключи и сервер для расчёт
 затем перейдите в корень, где находятся `pyproject.toml`, `uv.lock`, `analyze.py`.
 Официальный набор уже включён в `data/data/` этого приватного репозитория.
 
-Одна и та же команда работает в PowerShell, bash и zsh:
-
-```text
-uv run --frozen --no-dev python analyze.py --data ./data/data --out ./output
-```
-
-`uv` выбирает Python по `.python-version`, устанавливает зависимости из `uv.lock`
+В команде выше `uv` выбирает Python по `.python-version`, устанавливает зависимости из `uv.lock`
 и запускает расчёт. `--frozen` запрещает незаметное обновление lockfile;
 `--no-dev` исключает инструменты разработки из установки. См.
 [описание работы с проектами uv](https://docs.astral.sh/uv/guides/projects/).
 Интернет нужен при первой загрузке Python и пакетов; сам расчёт сетевых запросов
-не выполняет. Не оценивайте скорость алгоритма по времени первой установки.
+не выполняет. Требование ТЗ «от сырых Parquet до трёх выгрузок за ≤ 5 минут»
+проверяется на установленном окружении: скорость первоначального скачивания
+пакетов зависит от сети и не является временем обработки данных.
 
-В `output/` появятся:
+В `artifacts/` появятся:
 
 - `nodes_roles.csv`: все узлы, роли, поддержка, кластер, приоритет и evidence;
 - `clusters.csv`: размер, seed, внутренний оборот, ключевые узлы и гипотеза;
-- `top_nodes.csv`: ранжированный список до 50 узлов с объяснениями;
+- `top_nodes.csv`: первые `min(50, N)` узлов с объяснениями (на официальных
+  данных — 50, то есть требование ≥ 20 выполнено; если в своём наборе меньше
+  20 узлов, выводятся все реальные узлы без выдуманных строк);
 - `run_report.json` и `result.json`: параметры, хеши и состояние расчёта.
 
 Схемы трёх CSV фиксированы по ТЗ. Идентификаторы int64 не преобразуются через
 float. CSV и JSON записываются в UTF-8; при открытии CSV в Excel укажите текстовый
 тип для `gid`, чтобы Excel не округлил длинные идентификаторы.
+
+Успех — **код завершения 0** и JSON в stdout. В нём есть `status: "success"`,
+`output_dir` (абсолютный каталог), `exports` (для каждого CSV — абсолютный
+`path`, `rows`, `columns` и `sha256`), все поля отчёта расчёта и
+`total_runtime_seconds`. Перед ответом пайплайн проверяет реальные CSV:
+фиксированный порядок колонок, количество строк и отсутствие пустых ячеек.
+Эта проверка выполняется во временном каталоге до замены прошлой выгрузки;
+ошибка сериализации сохраняет предыдущий комплект файлов. После публикации
+CLI повторно проверяет и хеширует конечные файлы. Если проверка не прошла,
+успешный ответ не выдаётся. JSON можно читать из
+stdout напрямую в программе; предупреждения uv при установке идут в stderr.
+
+`total_runtime_seconds` включает путь от проверки входных/выходных файлов до
+копирования (при явной тройке файлов), расчёта, записи и проверки CSV.
+`runtime_seconds` — более узкое время аналитической части. Оба не включают
+загрузку интерпретатора и установку зависимостей. Для измерения всего процесса
+используйте время запуска команды операционной системой.
+
+## Повторный запуск без интернета
+
+После успешной первой установки тот же процесс можно принудительно выполнить
+в offline-режиме uv:
+
+```text
+uv run --offline --frozen --no-dev python analyze.py --data ./data/data --out ./artifacts
+```
+
+Окружение и кеш должны быть доступны на этой машине. Без uv запустите уже
+установленный интерпретатор `.venv` напрямую (Windows PowerShell):
+
+```powershell
+.\.venv\Scripts\python.exe analyze.py --data ./data/data --out ./artifacts
+```
+
+macOS/Linux:
+
+```sh
+./.venv/bin/python analyze.py --data ./data/data --out ./artifacts
+```
+
+Эти команды не устанавливают пакеты и не обращаются к внешним сервисам.
+Для полностью изолированной новой машины пакеты/интерпретатор нужно заранее
+перенести отдельно; репозиторий не включает их бинарные дистрибутивы.
 
 ## Три отдельных файла
 
@@ -70,8 +124,8 @@ uv run --frozen --no-dev python analyze.py --nodes "input/client list.parquet" -
 Существующий CLI сохранён:
 
 ```text
-uv run --frozen --no-dev money-graph analyze --data ./data/data --out ./output
-uv run --frozen --no-dev python -m money_graph analyze --data ./data/data --out ./output
+uv run --frozen --no-dev money-graph analyze --data ./data/data --out ./artifacts
+uv run --frozen --no-dev python -m money_graph analyze --data ./data/data --out ./artifacts
 ```
 
 Оба поддерживают те же параметры отдельных файлов и необязательный
@@ -108,7 +162,7 @@ Windows, PowerShell:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r requirements.txt
-.\.venv\Scripts\python.exe analyze.py --data ./data/data --out ./output
+.\.venv\Scripts\python.exe analyze.py --data ./data/data --out ./artifacts
 ```
 
 macOS/Linux:
@@ -116,7 +170,7 @@ macOS/Linux:
 ```sh
 python3.12 -m venv .venv
 ./.venv/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
-./.venv/bin/python analyze.py --data ./data/data --out ./output
+./.venv/bin/python analyze.py --data ./data/data --out ./artifacts
 ```
 
 Активация окружения не нужна. `analyze.py` использует код из `src/`, поэтому
@@ -182,4 +236,5 @@ uv run --frozen --no-dev python scripts/start.py --data ./data/data --port 3010
 
 Переносимость не означает, что все комбинации ОС и архитектуры испытаны на этом
 ноутбуке. Фактически выполненные прогоны и ограничения указаны в
-[VALIDATION_04.md](VALIDATION_04.md); результаты CI следует смотреть отдельно.
+[VALIDATION_05.md](VALIDATION_05.md). GitHub CI отключён по запросу владельца;
+локальные команды проверки работают независимо от него.

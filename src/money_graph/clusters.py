@@ -1,6 +1,7 @@
 """Community-level flow summaries with falsifiable structural hypotheses."""
 
 from collections import Counter, defaultdict
+from math import fsum
 from typing import Any
 
 
@@ -11,29 +12,30 @@ def summarize(
     mapping = {str(row["gid"]): row["cluster_id"] for row in records}
     for row in records:
         members[row["cluster_id"]].append(row)
-    flows: dict[tuple[int, int], float] = defaultdict(float)
+    amounts: dict[tuple[int, int], list[float]] = defaultdict(list)
     counts: dict[tuple[int, int], int] = defaultdict(int)
     for edge in edges:
         pair = (mapping[str(edge["src"])], mapping[str(edge["dst"])])
-        flows[pair] += edge["sum_kzt"]
+        amounts[pair].append(edge["sum_kzt"])
         counts[pair] += 1
-    incoming_by_cluster: dict[int, float] = defaultdict(float)
-    outgoing_by_cluster: dict[int, float] = defaultdict(float)
-    # Preserve the order of grouped floating-point additions, but visit each
-    # inter-community pair once instead of scanning all pairs for every cluster.
+    flows = {pair: fsum(values) for pair, values in amounts.items()}
+    incoming_by_cluster: dict[int, list[float]] = defaultdict(list)
+    outgoing_by_cluster: dict[int, list[float]] = defaultdict(list)
+    # Summation must retain small transfers alongside large ones. Group once
+    # to keep O(E + K) work while using compensated summation for every total.
     for (src, dst), amount in flows.items():
         if src != dst:
-            incoming_by_cluster[dst] += amount
-            outgoing_by_cluster[src] += amount
+            incoming_by_cluster[dst].append(amount)
+            outgoing_by_cluster[src].append(amount)
     summaries = []
     for cid, group in sorted(members.items()):
         roles = Counter(row["role"] for row in group)
         seeds = sum(row["is_seed"] for row in group)
         boundary = sum(row["boundary_censored"] for row in group)
-        internal = flows[(cid, cid)]
-        incoming = incoming_by_cluster[cid]
-        outgoing = outgoing_by_cluster[cid]
-        total = internal + incoming + outgoing
+        internal = flows.get((cid, cid), 0.0)
+        incoming = fsum(incoming_by_cluster[cid])
+        outgoing = fsum(outgoing_by_cluster[cid])
+        total = fsum((internal, incoming, outgoing))
         if len(group) == 1 and group[0]["isolated"]:
             hypothesis = "Изолированный узел: связи и назначение не установлены в данной выгрузке."
         else:

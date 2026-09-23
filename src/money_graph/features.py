@@ -7,11 +7,19 @@ import pandas as pd
 
 
 def percentile(values: pd.Series, eligible: pd.Series | None = None) -> pd.Series:
+    """Mid-distribution rank among positive, observable values.
+
+    P(x) = (count(values < x) + 0.5 * count(values == x)) / count(values).
+    Equal evidence always gets 0.5, including a singleton. Repeating a
+    population does not inflate its ranks; zeros are not positive evidence.
+    """
     mask = values > 0
     if eligible is not None:
         mask &= eligible
     result = pd.Series(0.0, index=values.index)
-    result.loc[mask] = values.loc[mask].rank(method="average", pct=True)
+    positive = values.loc[mask]
+    if len(positive):
+        result.loc[mask] = (positive.rank(method="average") - 0.5) / len(positive)
     return result
 
 
@@ -50,7 +58,8 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
     frame["self_transfer_tx"] = pd.Series(
         {gid: attrs["n_tx"] for gid, attrs in self_flows.items()}, dtype="int64"
     ).reindex(frame.index, fill_value=0)
-    exact = len(external) <= rules["betweenness_exact_max_nodes"]
+    active = [gid for gid, degree in external.degree() if degree]
+    exact = len(active) <= rules["betweenness_exact_max_nodes"]
     # Degree views are cheap; materialize one metric at a time instead of
     # retaining all metric dictionaries alongside the graph and dataframe.
     for column, degree in (
@@ -62,15 +71,31 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
         ("out_tx", external.out_degree(weight="n_tx")),
     ):
         frame[column] = pd.Series(dict(degree))
-    frame["pagerank"] = pd.Series(nx.pagerank(external, weight="sum_kzt", max_iter=500))
-    frame["betweenness"] = pd.Series(
-        nx.betweenness_centrality(
-            external,
-            k=None if exact else min(rules["betweenness_samples"], len(external)),
+    # NetworkX stops at N * tol: keep the same global numerical accuracy as
+    # dataset size grows instead of allowing more error on larger graphs.
+    frame["pagerank"] = pd.Series(
+        nx.pagerank(external, weight="sum_kzt", max_iter=500, tol=1e-8 / max(len(external), 1))
+    )
+    if exact:
+        centrality = nx.betweenness_centrality(external, weight=None)
+    else:
+        # An isolated seed cannot lie on a path. Sampling it wastes a pivot
+        # and can erase observed intermediaries when empty records are added.
+        connected = external.subgraph(active)
+        centrality = nx.betweenness_centrality(
+            connected,
+            k=min(rules["betweenness_samples"], len(active)),
             seed=rules["random_seed"],
             weight=None,
         )
-    )
+        # Keep raw centrality comparable to NetworkX on the full input graph.
+        factor = (
+            (len(active) - 1) * (len(active) - 2) / ((len(external) - 1) * (len(external) - 2))
+            if len(external) > 2
+            else 1.0
+        )
+        centrality = {gid: value * factor for gid, value in centrality.items()}
+    frame["betweenness"] = pd.Series(centrality).reindex(frame.index, fill_value=0.0)
     reach = dict.fromkeys(graph, 0)
     for seed in nodes.loc[nodes.is_seed, "gid"]:
         for gid in nx.single_source_shortest_path_length(

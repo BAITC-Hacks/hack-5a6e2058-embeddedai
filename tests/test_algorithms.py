@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from money_graph.demo import create_demo
-from money_graph.features import build_graph, compute
+from money_graph.features import build_graph, compute, percentile
 from money_graph.investigation import sensitivity
 from money_graph.loader import DataError
 from money_graph.pipeline import analyze, read_rules, validate_result, write_result
@@ -101,7 +101,8 @@ def test_self_transfers_are_preserved_but_cannot_manufacture_transit(tmp_path: P
     assert result["report"]["n_self_transfer_nodes"] == 2
     assert result["report"]["self_transfer_kzt"] == 1_010_000
     assert result["report"]["betweenness_method"] == "exact"
-    assert result["report"]["betweenness_pivots"] == len(nodes)
+    assert result["report"]["n_active_nodes"] == 2
+    assert result["report"]["betweenness_pivots"] == 2
     assert (
         sum(c["sum_kzt_internal"] for c in result["clusters"])
         + sum(edge["sum_kzt"] for edge in result["cluster_edges"])
@@ -231,3 +232,56 @@ def test_demo_depths_are_minimum_bfs_distances_and_all_nonseeds_are_reachable(tm
     assert set(minimum_depth) == set(nodes.gid)
     assert all(row.depth == minimum_depth[row.gid] for row in nodes.itertuples())
     assert all(row.depth == minimum_depth[row.src] + 1 <= 4 for row in edges.itertuples())
+
+
+def test_percentiles_do_not_inflate_equal_or_singleton_evidence():
+    for size in (1, 2, 3, 100):
+        assert percentile(pd.Series([7.0] * size)).tolist() == [0.5] * size
+    values = pd.Series([0.0, 1.0, 1.0, 4.0, 9.0, 9.0, float("nan")])
+    expected = [0.0, 0.2, 0.2, 0.5, 0.8, 0.8, 0.0]
+    assert percentile(values).tolist() == pytest.approx(expected)
+    repeated = pd.concat([values] * 20, ignore_index=True)
+    assert percentile(repeated).tolist() == pytest.approx(expected * 20)
+    assert percentile(values, pd.Series([False] * len(values))).eq(0).all()
+
+
+def test_a_single_positive_bridge_is_not_automatically_a_top_decile_coordinator():
+    # The same ratio and absolute flow thresholds retain their meaning in a
+    # tiny dataset; a lone observation is not evidence of an extreme rank.
+    nodes = pd.DataFrame(
+        {"gid": range(6), "depth": [0, 0, 0, 1, 2, 2], "is_seed": [True] * 3 + [False] * 3}
+    )
+    edges = pd.DataFrame(
+        [
+            (0, 3, 5000.0, 1),
+            (1, 3, 5000.0, 1),
+            (2, 3, 5000.0, 1),
+            (3, 4, 7500.0, 1),
+            (3, 5, 7500.0, 1),
+        ],
+        columns=["src", "dst", "sum_kzt", "n_tx"],
+    )
+    rules = read_rules()
+    bridge = compute(build_graph(nodes, edges), nodes, rules).set_index("gid").loc[3].to_dict()
+    assert bridge["seed_reach"] == 3 and bridge["betweenness"] > 0
+    assert bridge["p_betweenness"] == 0.5
+    hypothesis = classify(bridge, rules)
+    assert hypothesis["role"] == "transit"
+    assert "coordinator" not in hypothesis["matched_rules"]
+
+
+@pytest.mark.parametrize(
+    "minimum,maximum,ratio",
+    [(0.1, 2.0, 0.2), (2.0, 4.0, 3.0), (1.0, 1.0, 1.0), (0.8, 1.2, 0.8)],
+)
+def test_transit_support_obeys_custom_ratio_bounds(minimum, maximum, ratio):
+    nodes = pd.DataFrame({"gid": [1, 2, 3], "depth": [0, 1, 2], "is_seed": [True, False, False]})
+    edges = pd.DataFrame(
+        {"src": [1, 2], "dst": [2, 3], "sum_kzt": [50_000.0, 50_000.0 * ratio], "n_tx": [1, 1]}
+    )
+    rules = read_rules() | {"transit_ratio_min": minimum, "transit_ratio_max": maximum}
+    account = compute(build_graph(nodes, edges), nodes, rules).set_index("gid").loc[2].to_dict()
+    hypothesis = classify(account, rules)
+    assert hypothesis["role"] == "transit"
+    assert 0 < hypothesis["role_score"] <= 1
+    assert all(0 <= trace["raw_support"] <= 1 for trace in hypothesis["rule_trace"])

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from money_graph import cli, pipeline
 from money_graph.cli import main
 from money_graph.demo import create_demo
 
@@ -160,3 +161,85 @@ def test_explicit_missing_input_is_an_actionable_error(tmp_path, source, capsys)
         main(arguments)
     assert error.value.code == 2
     assert "--transactions" in capsys.readouterr().err
+
+
+def test_success_response_identifies_and_checks_all_submitted_files(tmp_path, source, capsys):
+    output = tmp_path / "Результат анализа"
+    main(["analyze", "--data", str(source), "--out", str(output)])
+    response = json.loads(capsys.readouterr().out)
+    assert response["status"] == "success"
+    assert response["output_dir"] == str(output.resolve())
+    assert response["total_runtime_seconds"] >= response["runtime_seconds"]
+    assert set(response["exports"]) == {"nodes_roles.csv", "clusters.csv", "top_nodes.csv"}
+    assert response["exports"]["nodes_roles.csv"]["rows"] == response["n_nodes"] == 80
+    assert response["exports"]["clusters.csv"]["rows"] == response["n_clusters"]
+    assert response["exports"]["top_nodes.csv"]["rows"] == 50
+    for filename, entry in response["exports"].items():
+        assert entry["path"] == str((output / filename).resolve())
+        assert entry["sha256"] == hashlib.sha256((output / filename).read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("corruption", ["schema", "row_count", "empty", "missing", "extra"])
+def test_cli_never_reports_success_for_incomplete_serialized_exports(
+    tmp_path, source, capsys, monkeypatch, corruption
+):
+    import csv
+    import io
+
+    original_writer = cli.write_result
+
+    def faulty_writer(result, directory):
+        original_writer(result, directory)
+        path = directory / "nodes_roles.csv"
+        rows = list(csv.reader(io.StringIO(path.read_text(encoding="utf-8"))))
+        if corruption == "schema":
+            rows[0][0] = "wrong_id"
+        elif corruption == "row_count":
+            rows.pop()
+        elif corruption == "empty":
+            rows[1][-1] = ""
+        elif corruption == "missing":
+            rows[1].pop()
+        else:
+            rows[1].append("unexpected")
+        with path.open("w", encoding="utf-8", newline="") as destination:
+            csv.writer(destination).writerows(rows)
+
+    monkeypatch.setattr(cli, "write_result", faulty_writer)
+    with pytest.raises(SystemExit) as error:
+        main(["analyze", "--data", str(source), "--out", str(tmp_path / "output")])
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert captured.out == ""
+    assert "nodes_roles.csv" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("corruption", ["schema", "row_count"])
+def test_invalid_serialization_preserves_the_previous_complete_generation(
+    tmp_path, source, capsys, monkeypatch, corruption
+):
+    output = tmp_path / "output"
+    arguments = ["analyze", "--data", str(source), "--out", str(output)]
+    main(arguments)
+    capsys.readouterr()
+    previous = {path.name: path.read_bytes() for path in output.iterdir()}
+    original_serializer = pipeline.pd.DataFrame.to_csv
+
+    def corrupt_serialization(frame, path, *args, **kwargs):
+        if Path(path).name == "nodes_roles.csv":
+            if corruption == "schema":
+                kwargs["header"] = ["wrong_id", *frame.columns[1:]]
+            else:
+                frame = frame.iloc[:-1]
+        return original_serializer(frame, path, *args, **kwargs)
+
+    monkeypatch.setattr(pipeline.pd.DataFrame, "to_csv", corrupt_serialization)
+    with pytest.raises(SystemExit) as error:
+        main(arguments)
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert captured.out == ""
+    assert "nodes_roles.csv" in captured.err
+    assert {path.name: path.read_bytes() for path in output.iterdir()} == previous
+    assert not list(tmp_path.glob(".output-*"))

@@ -1,11 +1,8 @@
 name: Verify submission
 
 on:
-  push:
-    branches: [main]
-    paths-ignore: ["docs/**", "README.md", "artifacts/run_report.json"]
-  pull_request:
-    paths-ignore: ["docs/**", "README.md", "artifacts/run_report.json"]
+  # Disabled at the repository level at the owner's request. No automatic CI.
+  # Keep the matrix available for an explicit future re-enable and manual run.
   workflow_dispatch:
 
 permissions:

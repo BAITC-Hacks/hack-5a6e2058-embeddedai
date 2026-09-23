@@ -1,5 +1,5 @@
 {
-  "version": "2.1",
+  "version": "2.2",
   "random_seed": 42,
   "max_depth": 4,
   "betweenness_samples": 128,

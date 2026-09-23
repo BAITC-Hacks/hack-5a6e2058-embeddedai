@@ -15,8 +15,9 @@ from typing import Any, cast
 import networkx as nx
 import pandas as pd
 
+from . import anomalies, features, temporal
 from . import clusters as cluster_analysis
-from . import features, temporal
+from .exports import export_manifest
 from .investigation import sensitivity
 from .loader import FILES, DataError, load
 from .roles import LABELS, classify
@@ -119,6 +120,7 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
     dates = temporal.summarize(tx, list(graph))
     frame["cluster_id"] = frame.gid.map(mapping)
     records = cast(list[dict[str, Any]], frame.to_dict("records"))
+    n_active = int(((frame.in_deg + frame.out_deg) > 0).sum())
     for row in records:
         row.update(classify(row, rules))
         row["temporal"] = dates[row["gid"]]
@@ -154,6 +156,7 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
             row["next_checks"].append(
                 "Проверить назначение синхронных поступлений от нескольких плательщиков"
             )
+    anomalies.annotate(records)
     ranked = sorted(records, key=lambda row: (-row["priority_score"], row["gid"]))
     for rank, row in enumerate(ranked, 1):
         row["rank"] = rank
@@ -163,6 +166,8 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
     )
     report = {
         "n_nodes": len(nodes),
+        "n_active_nodes": n_active,
+        "n_anomalous_profiles": sum(bool(row["anomaly_profile"]["signals"]) for row in records),
         "n_edges": len(edges),
         "n_transactions": len(tx),
         "n_seed": int(nodes.is_seed.sum()),
@@ -170,17 +175,17 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
         "n_isolates": int(frame.isolated.sum()),
         "n_boundary": int(frame.boundary_censored.sum()),
         "n_self_transfer_nodes": int((frame.self_transfer_tx > 0).sum()),
-        "self_transfer_kzt": round(float(frame.self_transfer_kzt.sum()), 2),
+        "self_transfer_kzt": round(math.fsum(frame.self_transfer_kzt), 2),
         "betweenness_method": "exact"
-        if len(nodes) <= rules["betweenness_exact_max_nodes"]
+        if n_active <= rules["betweenness_exact_max_nodes"]
         else "sampled",
-        "betweenness_pivots": len(nodes)
-        if len(nodes) <= rules["betweenness_exact_max_nodes"]
-        else min(rules["betweenness_samples"], len(nodes)),
+        "betweenness_pivots": n_active
+        if n_active <= rules["betweenness_exact_max_nodes"]
+        else min(rules["betweenness_samples"], n_active),
         "n_components": nx.number_weakly_connected_components(graph),
         "n_connected_components": sum(len(c) > 1 for c in nx.weakly_connected_components(graph)),
         "sensitivity": stability,
-        "turnover_kzt": round(float(edges.sum_kzt.sum()), 2),
+        "turnover_kzt": round(math.fsum(edges.sum_kzt), 2),
         "period_from": str(tx.date.min().date()) if len(tx) else None,
         "period_to": str(tx.date.max().date()) if len(tx) else None,
         "role_counts": {role: sum(row["role"] == role for row in records) for role in LABELS},
@@ -279,6 +284,8 @@ def _validate_result(result: dict[str, Any]) -> None:
             **dict.fromkeys(
                 (
                     "n_nodes",
+                    "n_active_nodes",
+                    "n_anomalous_profiles",
                     "n_edges",
                     "n_transactions",
                     "n_seed",
@@ -423,8 +430,62 @@ def _validate_result(result: dict[str, Any]) -> None:
             dates == sorted(set(dates)) and len(dates) == temporal_data["active_days"],
             "daily dates",
         )
+        profile = row["anomaly_profile"]
+        fields(
+            profile,
+            {
+                "cohort_depth": integer,
+                "cohort_size": integer,
+                "minimum_cohort_size": lambda value: value == anomalies.MINIMUM_COHORT_SIZE,
+                "signals": lambda value: isinstance(value, list),
+                "caveat": text,
+            },
+            "anomaly_profile",
+        )
+        require(profile["cohort_depth"] == row["depth"], "anomaly cohort_depth")
+        seen_metrics = set()
+        for signal in profile["signals"]:
+            fields(
+                signal,
+                {
+                    "metric": lambda value: isinstance(value, str) and value in anomalies.METRICS,
+                    **dict.fromkeys(("value", "threshold", "q1", "q3"), number),
+                    "text": text,
+                },
+                "anomaly signal",
+            )
+            require(
+                signal["metric"] not in seen_metrics
+                and row["in_deg"] + row["out_deg"] > 0
+                and profile["cohort_size"] >= anomalies.MINIMUM_COHORT_SIZE
+                and signal["value"] == row[signal["metric"]]
+                and signal["q3"] > signal["q1"]
+                and signal["threshold"] == signal["q3"] + 3 * (signal["q3"] - signal["q1"])
+                and signal["value"] > signal["threshold"],
+                "anomaly signal evidence",
+            )
+            seen_metrics.add(signal["metric"])
     by_id = {row["gid"]: row for row in nodes}
     require(len(by_id) == len(nodes), "duplicate gid")
+    n_active = sum(row["in_deg"] + row["out_deg"] > 0 for row in nodes)
+    exact = n_active <= report["rules"]["betweenness_exact_max_nodes"]
+    require(report["n_active_nodes"] == n_active, "n_active_nodes")
+    cohort_sizes = Counter(row["depth"] for row in nodes if row["in_deg"] + row["out_deg"] > 0)
+    require(
+        all(row["anomaly_profile"]["cohort_size"] == cohort_sizes[row["depth"]] for row in nodes),
+        "anomaly cohort_size",
+    )
+    require(
+        report["n_anomalous_profiles"]
+        == sum(bool(row["anomaly_profile"]["signals"]) for row in nodes),
+        "n_anomalous_profiles",
+    )
+    require(report["betweenness_method"] == ("exact" if exact else "sampled"), "betweenness_method")
+    require(
+        report["betweenness_pivots"]
+        == (n_active if exact else min(report["rules"]["betweenness_samples"], n_active)),
+        "betweenness_pivots",
+    )
     ranked = sorted(nodes, key=lambda row: (-row["priority_score"], int(row["gid"])))
     require([row["rank"] for row in ranked] == list(range(1, len(nodes) + 1)), "ranks")
     expected_counts = Counter(row["role"] for row in nodes)
@@ -437,7 +498,7 @@ def _validate_result(result: dict[str, Any]) -> None:
         ("n_boundary", "boundary_censored"),
     ):
         require(report[count] == sum(row[field] for row in nodes), count)
-    flows: dict[tuple[int, int], float] = defaultdict(float)
+    flow_amounts: dict[tuple[int, int], list[float]] = defaultdict(list)
     edge_counts: Counter[tuple[int, int]] = Counter()
     pairs = set()
     for edge in result["edges"]:
@@ -455,15 +516,19 @@ def _validate_result(result: dict[str, Any]) -> None:
         require(src in by_id and dst in by_id and (src, dst) not in pairs, "edge endpoints")
         pairs.add((src, dst))
         cluster_pair = (by_id[src]["cluster_id"], by_id[dst]["cluster_id"])
-        flows[cluster_pair] += edge["sum_kzt"]
+        flow_amounts[cluster_pair].append(edge["sum_kzt"])
         edge_counts[cluster_pair] += 1
+    flows = {pair: math.fsum(amounts) for pair, amounts in flow_amounts.items()}
     require(len(pairs) == report["n_edges"], "n_edges")
     require(
         sum(edge["n_tx"] for edge in result["edges"]) == report["n_transactions"], "n_transactions"
     )
     require(
         math.isclose(
-            sum(edge["sum_kzt"] for edge in result["edges"]), report["turnover_kzt"], abs_tol=0.01
+            math.fsum(edge["sum_kzt"] for edge in result["edges"]),
+            report["turnover_kzt"],
+            rel_tol=0,
+            abs_tol=0.01,
         ),
         "turnover_kzt",
     )
@@ -502,7 +567,9 @@ def _validate_result(result: dict[str, Any]) -> None:
             "cluster role_counts",
         )
         require(
-            math.isclose(cluster["sum_kzt_internal"], flows[(cid, cid)], abs_tol=0.01),
+            math.isclose(
+                cluster["sum_kzt_internal"], flows.get((cid, cid), 0.0), rel_tol=0, abs_tol=0.01
+            ),
             "cluster internal turnover",
         )
     require(
@@ -523,7 +590,7 @@ def _validate_result(result: dict[str, Any]) -> None:
         )
         require(
             edge["n_edges"] == edge_counts[pair]
-            and math.isclose(edge["sum_kzt"], flows[pair], abs_tol=0.01),
+            and math.isclose(edge["sum_kzt"], flows[pair], rel_tol=0, abs_tol=0.01),
             "cluster_edge totals",
         )
         linked.add(pair)
@@ -588,6 +655,8 @@ def write_result(result: dict[str, Any], out_dir: Path) -> None:
                 json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
                 encoding="utf-8",
             )
+        # A serialization error must never replace a previously valid generation.
+        export_manifest(result, staging)
         if backup.exists():
             raise DataError(f"Обнаружена резервная выгрузка {backup}; проверьте предыдущий запуск")
         if out_dir.exists():

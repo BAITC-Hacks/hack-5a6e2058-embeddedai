@@ -16,6 +16,20 @@ export interface Edge {
   n_tx: number;
 }
 export interface NodeDetail extends GraphNode {
+  anomaly_profile: {
+    cohort_depth: number;
+    cohort_size: number;
+    minimum_cohort_size: number;
+    signals: {
+      metric: string;
+      value: number;
+      threshold: number;
+      q1: number;
+      q3: number;
+      text: string;
+    }[];
+    caveat: string;
+  };
   self_transfer_kzt: number;
   self_transfer_tx: number;
   self_only: boolean;
