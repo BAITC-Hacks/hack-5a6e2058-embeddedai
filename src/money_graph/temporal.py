@@ -48,20 +48,28 @@ def _patterns(daily: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         for day in daily:
             events = day[f"_{direction}_events"]
-            for amount, count in Counter(amount for amount, _ in events).items():
-                if count >= 3 and amount <= q1:
-                    groups.append(
-                        {
-                            "date": day["date"],
-                            "direction": direction,
-                            "amount_kzt": amount,
-                            "n_tx": count,
-                            "total_kzt": math.fsum([amount] * count),
-                            "counterparties": len(
-                                {other for value, other in events if value == amount}
-                            ),
-                        }
-                    )
+            frequencies = Counter(amount for amount, _ in events)
+            counterparties: dict[float, set[int]] = {
+                amount: set()
+                for amount, count in frequencies.items()
+                if count >= 3 and amount <= q1
+            }
+            # Group once: scanning every event again for every amount is quadratic.
+            for amount, other in events:
+                if amount in counterparties:
+                    counterparties[amount].add(other)
+            for amount, others in counterparties.items():
+                count = frequencies[amount]
+                groups.append(
+                    {
+                        "date": day["date"],
+                        "direction": direction,
+                        "amount_kzt": amount,
+                        "n_tx": count,
+                        "total_kzt": math.fsum([amount] * count),
+                        "counterparties": len(others),
+                    }
+                )
     groups.sort(
         key=lambda group: (
             -group["n_tx"],

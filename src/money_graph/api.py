@@ -26,7 +26,7 @@ MAX_FILE_BYTES = 10 * 1024 * 1024
 
 
 def create_app(initial_data: Path | None = None, storage: Path | None = None) -> FastAPI:
-    app = FastAPI(title="Граф денег", version="0.7.0")
+    app = FastAPI(title="Граф денег", version="0.8.0")
     directory = (storage or Path(os.getenv("MONEY_GRAPH_STORAGE", ROOT / "var/runs"))).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     gate = threading.Lock()
@@ -106,7 +106,7 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": "0.7.0"}
+        return {"status": "ok", "version": "0.8.0"}
 
     @app.get("/api/bootstrap")
     def initial_run() -> dict[str, Any]:

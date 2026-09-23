@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .loader import DataError
-from .pipeline import validate_result
+from .pipeline import RESULT_VERSION, validate_result
 
 LOGGER = logging.getLogger(__name__)
 RUN_ID = re.compile(r"[a-f0-9]{32}")
@@ -116,7 +116,8 @@ def read_result(
     ):
         raise CorruptRun
     if expected_rules is not None and (
-        result["report"].get("rules") != expected_rules
+        result["report"].get("result_version") != RESULT_VERSION
+        or result["report"].get("rules") != expected_rules
         or result["report"].get("rules_version") != expected_rules["version"]
     ):
         raise ObsoleteRun

@@ -25,6 +25,7 @@ from .roles import LABELS, classify
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPORTS = ("nodes_roles.csv", "clusters.csv", "top_nodes.csv")
+RESULT_VERSION = 2
 
 
 def clean(value: Any) -> Any:
@@ -157,6 +158,15 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
             row["next_checks"].append(
                 "Проверить назначение синхронных поступлений от нескольких плательщиков"
             )
+        patterns = row["temporal"]["patterns"]
+        if patterns["activity"]["spike_day_count"]:
+            row["next_checks"].append(
+                "Сопоставить дни всплесков с обычной активностью и назначениями операций"
+            )
+        if patterns["repeated_amounts"]["group_count"]:
+            row["next_checks"].append(
+                "Проверить повторные малые суммы: регулярные платежи или гипотеза дробления; запросить операции ниже порога"
+            )
     anomalies.annotate(records)
     ranked = sorted(records, key=lambda row: (-row["priority_score"], row["gid"]))
     for rank, row in enumerate(ranked, 1):
@@ -166,6 +176,17 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
         ranked, cast(list[dict[str, Any]], edges.to_dict("records"))
     )
     report = {
+        "result_version": RESULT_VERSION,
+        "temporal_patterns_version": "1",
+        "n_activity_spike_nodes": sum(
+            row["temporal"]["patterns"]["activity"]["spike_day_count"] > 0 for row in records
+        ),
+        "n_synchronous_nodes": sum(
+            row["temporal"]["patterns"]["synchronous"]["day_count"] > 0 for row in records
+        ),
+        "n_repeated_amount_nodes": sum(
+            row["temporal"]["patterns"]["repeated_amounts"]["group_count"] > 0 for row in records
+        ),
         "n_nodes": len(nodes),
         "n_active_nodes": n_active,
         "n_anomalous_profiles": sum(bool(row["anomaly_profile"]["signals"]) for row in records),
@@ -431,6 +452,113 @@ def _validate_result(result: dict[str, Any]) -> None:
             dates == sorted(set(dates)) and len(dates) == temporal_data["active_days"],
             "daily dates",
         )
+        if report.get("result_version") == RESULT_VERSION or "patterns" in temporal_data:
+            patterns = temporal_data["patterns"]
+            fields(patterns, {"version": lambda v: v == "1", "caveat": text}, "temporal.patterns")
+            activity = patterns["activity"]
+            fields(
+                activity,
+                {
+                    "status": lambda v: v in ("assessed", "insufficient_history"),
+                    "active_days": integer,
+                    "minimum_days": lambda v: v == 7,
+                    "baseline_median_tx": lambda v: v is None or number(v),
+                    "threshold_tx": lambda v: v is None or number(v),
+                    "spike_day_count": integer,
+                    "spike_days": lambda v: isinstance(v, list) and len(v) <= 5,
+                    "rule": text,
+                },
+                "patterns.activity",
+            )
+            require(
+                activity["active_days"] == len(dates)
+                and activity["spike_day_count"] >= len(activity["spike_days"]),
+                "activity counts",
+            )
+            for spike in activity["spike_days"]:
+                fields(
+                    spike,
+                    {
+                        "date": lambda v: v in dates,
+                        "n_tx": integer,
+                        "in_tx": integer,
+                        "out_tx": integer,
+                        "in_kzt": number,
+                        "out_kzt": number,
+                    },
+                    "activity.spike",
+                )
+                require(
+                    activity["status"] == "assessed"
+                    and number(activity["threshold_tx"])
+                    and spike["n_tx"] > activity["threshold_tx"],
+                    "activity threshold",
+                )
+            sync = patterns["synchronous"]
+            fields(
+                sync,
+                {
+                    "minimum_senders": lambda v: v == 3,
+                    "day_count": integer,
+                    "days": lambda v: isinstance(v, list) and len(v) <= 5,
+                },
+                "patterns.synchronous",
+            )
+            require(sync["day_count"] >= len(sync["days"]), "synchronous count")
+            for signal in sync["days"]:
+                fields(
+                    signal,
+                    {
+                        "date": lambda v: v in dates,
+                        "senders": lambda v: integer(v, 3),
+                        "in_tx": integer,
+                        "in_kzt": number,
+                    },
+                    "synchronous day",
+                )
+            repeat = patterns["repeated_amounts"]
+            fields(
+                repeat,
+                {
+                    "minimum_repeats": lambda v: v == 3,
+                    "minimum_transactions": lambda v: v == 8,
+                    "group_count": integer,
+                    "groups": lambda v: isinstance(v, list) and len(v) <= 5,
+                    "rule": text,
+                },
+                "patterns.repeated_amounts",
+            )
+            require(repeat["group_count"] >= len(repeat["groups"]), "repeat count")
+            for direction in ("in", "out"):
+                fields(
+                    repeat["directions"][direction],
+                    {
+                        "status": lambda v: v in ("assessed", "insufficient_transactions"),
+                        "n_transactions": integer,
+                        "q1_kzt": lambda v: v is None or number(v),
+                    },
+                    "repeat.direction",
+                )
+            for group in repeat["groups"]:
+                fields(
+                    group,
+                    {
+                        "date": lambda v: v in dates,
+                        "direction": lambda v: v in ("in", "out"),
+                        "amount_kzt": number,
+                        "n_tx": lambda v: integer(v, 3),
+                        "total_kzt": number,
+                        "counterparties": lambda v: integer(v, 1),
+                    },
+                    "repeat.group",
+                )
+                direction = repeat["directions"][group["direction"]]
+                require(
+                    direction["status"] == "assessed"
+                    and number(direction["q1_kzt"])
+                    and group["amount_kzt"] <= direction["q1_kzt"],
+                    "repeat threshold",
+                )
         profile = row["anomaly_profile"]
         fields(
             profile,

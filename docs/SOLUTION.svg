@@ -20,10 +20,12 @@
   <text x="56" y="113" font-size="45" font-weight="700">Граф денег</text>
   <text x="56" y="151" font-size="23" fill="#526779">Данные → метрики → роли → действия аналитика</text>
   <rect x="1020" y="52" width="524" height="102" rx="14" fill="#e8f5f1"/>
-  <text x="1044" y="86" font-size="20" font-weight="700" fill="#087768">Один воспроизводимый локальный запуск</text>
+  <text x="1044" y="86" font-size="18" font-weight="700" fill="#087768">Один воспроизводимый локальный запуск</text>
   <text x="1044" y="119" class="body">Без GPU и обязательного платного API</text>
 
-  <path d="M382 368H430 M770 368H818 M1158 368H1206" fill="none" stroke="#198d7d" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M382 368H430" fill="none" stroke="#198d7d" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M770 368H818" fill="none" stroke="#198d7d" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1158 368H1206" fill="none" stroke="#198d7d" stroke-width="3" marker-end="url(#arrow)"/>
   <path d="M994 568V590H412V608" fill="none" stroke="#198d7d" stroke-width="2.5" marker-end="url(#arrow)"/>
   <path d="M1382 570V608" fill="none" stroke="#8062be" stroke-width="2" stroke-dasharray="5 5" marker-start="url(#optional-arrow)" marker-end="url(#optional-arrow)"/>
 
@@ -36,7 +38,7 @@
   <text x="80" y="407" class="code">transactions.parquet</text>
   <path d="M80 433H356" stroke="#e5ecf1"/>
   <text x="80" y="463" class="body">Проверка схем, ID и дат</text>
-  <text x="80" y="491" class="body">Сверка сумм и числа операций</text>
+  <text x="80" y="491" class="body">Суммы и число переводов</text>
   <text x="80" y="534" class="small">int64 без округления · SHA-256</text>
 
   <rect class="card" x="444" y="208" width="326" height="360" rx="16"/>
