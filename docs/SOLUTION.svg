@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">Граф денег — схема решения</title>
+  <desc id="description">Один локальный запуск: три Parquet проходят валидацию, вычисляются метрики направленного графа, объяснимые роли, сообщества и приоритет. Три CSV и автономный HTML создаются без платных сервисов. FastAPI и Cytoscape показывают граф, очередь и карточки. Необязательный AI-аналитик вызывает проверяемые инструменты графа и возвращает интерпретацию со ссылками.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#198d7d"/></marker>
+    <marker id="optional-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#8062be"/></marker>
+    <style>
+      text { font-family: "DejaVu Sans", Arial, sans-serif; fill: #153549; }
+      .body { font-size: 18px; fill: #3c5667; }
+      .small { font-size: 16px; fill: #526779; }
+      .eyebrow { font-size: 15px; font-weight: 700; letter-spacing: 2px; fill: #087768; }
+      .heading { font-size: 25px; font-weight: 700; }
+      .code { font-family: "DejaVu Sans Mono", monospace; font-size: 17px; }
+      .card { fill: #fff; stroke: #d6e1e8; stroke-width: 1.5; }
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="#f3f6f8"/>
+  <rect width="1600" height="8" fill="#198d7d"/>
+  <text x="56" y="56" class="eyebrow">EMBEDDEDAI · HACKALEM · ОБЪЯСНИМАЯ АНАЛИТИКА</text>
+  <text x="56" y="113" font-size="45" font-weight="700">Граф денег</text>
+  <text x="56" y="151" font-size="23" fill="#526779">Данные → метрики → роли → действия аналитика</text>
+  <rect x="1020" y="52" width="524" height="102" rx="14" fill="#e8f5f1"/>
+  <text x="1044" y="86" font-size="20" font-weight="700" fill="#087768">Один воспроизводимый локальный запуск</text>
+  <text x="1044" y="119" class="body">Без GPU и обязательного платного API</text>
+
+  <path d="M382 368H430 M770 368H818 M1158 368H1206" fill="none" stroke="#198d7d" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M994 568V590H412V608" fill="none" stroke="#198d7d" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M1382 570V608" fill="none" stroke="#8062be" stroke-width="2" stroke-dasharray="5 5" marker-start="url(#optional-arrow)" marker-end="url(#optional-arrow)"/>
+
+  <rect class="card" x="56" y="208" width="326" height="360" rx="16"/>
+  <rect x="80" y="232" width="42" height="34" rx="8" fill="#e8f5f1"/>
+  <text x="91" y="256" font-size="18" font-weight="700" fill="#087768">01</text>
+  <text x="80" y="306" class="heading">Данные</text>
+  <text x="80" y="345" class="code">nodes.parquet</text>
+  <text x="80" y="376" class="code">edges.parquet</text>
+  <text x="80" y="407" class="code">transactions.parquet</text>
+  <path d="M80 433H356" stroke="#e5ecf1"/>
+  <text x="80" y="463" class="body">Проверка схем, ID и дат</text>
+  <text x="80" y="491" class="body">Сверка сумм и числа операций</text>
+  <text x="80" y="534" class="small">int64 без округления · SHA-256</text>
+
+  <rect class="card" x="444" y="208" width="326" height="360" rx="16"/>
+  <rect x="468" y="232" width="42" height="34" rx="8" fill="#e8f5f1"/>
+  <text x="479" y="256" font-size="18" font-weight="700" fill="#087768">02</text>
+  <text x="468" y="306" class="heading">Метрики</text>
+  <text x="468" y="345" class="body">Потоки и число контрагентов</text>
+  <text x="468" y="376" class="body">PageRank · посредничество</text>
+  <text x="468" y="407" class="body">Охват seed · денежный объём</text>
+  <path d="M468 433H744" stroke="#e5ecf1"/>
+  <text x="468" y="463" class="body">Дневные потоки · пути · циклы</text>
+  <text x="468" y="491" class="body">Граница обхода · мало данных</text>
+  <text x="468" y="534" class="small">Python · pandas · NetworkX</text>
+
+  <rect class="card" x="832" y="208" width="326" height="360" rx="16"/>
+  <rect x="856" y="232" width="42" height="34" rx="8" fill="#e8f5f1"/>
+  <text x="867" y="256" font-size="18" font-weight="700" fill="#087768">03</text>
+  <text x="856" y="306" class="heading">Роли и приоритет</text>
+  <text x="856" y="345" class="body">6 ролей · явные пороги v2.2</text>
+  <text x="856" y="376" class="body">role_score + evidence</text>
+  <text x="856" y="407" class="body">Приоритет по 6 метрикам</text>
+  <path d="M856 433H1132" stroke="#e5ecf1"/>
+  <text x="856" y="463" class="body">Louvain: группы и гипотезы</text>
+  <text x="856" y="491" class="body">Поправки на наблюдаемость</text>
+  <text x="856" y="534" class="small">Роль — гипотеза, не обвинение</text>
+
+  <rect class="card" x="1220" y="208" width="324" height="360" rx="16"/>
+  <rect x="1244" y="232" width="42" height="34" rx="8" fill="#e8f5f1"/>
+  <text x="1255" y="256" font-size="18" font-weight="700" fill="#087768">04</text>
+  <text x="1244" y="306" class="heading">Интерфейс</text>
+  <text x="1244" y="345" class="body">Направленный граф · TOP 50</text>
+  <text x="1244" y="376" class="body">Поиск любого gid · карточка</text>
+  <text x="1244" y="407" class="body">Очередь · фильтры · выгрузка</text>
+  <path d="M1244 433H1518" stroke="#e5ecf1"/>
+  <text x="1244" y="463" class="body">Устойчивость · что проверить</text>
+  <text x="1244" y="491" class="body">Светлая / тёмная тема</text>
+  <text x="1244" y="534" class="small">FastAPI · TypeScript · Cytoscape</text>
+
+  <rect x="56" y="612" width="714" height="178" rx="16" fill="#e8f5f1" stroke="#b9dacf"/>
+  <text x="80" y="650" class="heading">Артефакты одного запуска</text>
+  <text x="80" y="687" class="code">nodes_roles.csv</text>
+  <text x="80" y="719" class="code">clusters.csv</text>
+  <text x="80" y="751" class="code">top_nodes.csv</text>
+  <path d="M389 676V764" stroke="#b9dacf"/>
+  <text x="415" y="688" class="body">+ автономный report.html</text>
+  <text x="415" y="719" class="body">+ параметры и SHA-256</text>
+  <text x="415" y="751" class="small">CSV проверяются до завершения</text>
+
+  <rect x="832" y="612" width="712" height="178" rx="16" fill="#f0edf8" stroke="#cfc3e5" stroke-dasharray="6 4"/>
+  <text x="856" y="650" class="heading">AI-аналитик · необязательный модуль</text>
+  <text x="856" y="687" class="body">Вопрос + контекст → OpenAI выбирает проверки</text>
+  <text x="856" y="719" class="body">Сервер вычисляет факты → AI объясняет со ссылками</text>
+  <text x="856" y="751" class="small">Ключ на сервере · ограниченные инструменты · без автодействий</text>
+
+  <rect x="56" y="812" width="1488" height="43" rx="9" fill="#153549"/>
+  <text x="80" y="840" class="code" style="fill:#eff9f6;font-size:19px">uv run --frozen --no-dev python analyze.py --data ./data/data --out ./artifacts</text>
+  <text x="56" y="883" class="small">Пороги: config/rules.json · формулы: docs/METHODOLOGY.md · исходные таблицы не обогащаются</text>
+  <text x="1317" y="883" class="small">Схема решения · 1 / 1</text>
+</svg>

@@ -1,5 +1,6 @@
 """Directed flow metrics; an undirected projection is used only for communities."""
 
+import math
 from typing import Any
 
 import networkx as nx
@@ -65,12 +66,19 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
     for column, degree in (
         ("in_deg", external.in_degree()),
         ("out_deg", external.out_degree()),
-        ("in_kzt", external.in_degree(weight="sum_kzt")),
-        ("out_kzt", external.out_degree(weight="sum_kzt")),
         ("in_tx", external.in_degree(weight="n_tx")),
         ("out_tx", external.out_degree(weight="n_tx")),
     ):
         frame[column] = pd.Series(dict(degree))
+    # Weighted degree uses naive float summation in NetworkX. Preserve small
+    # transfers alongside large ones before computing balances or role thresholds.
+    for direction, edge_view in (("in", external.in_edges), ("out", external.out_edges)):
+        frame[f"{direction}_kzt"] = pd.Series(
+            {
+                gid: math.fsum(attrs["sum_kzt"] for _, _, attrs in edge_view(gid, data=True))
+                for gid in external
+            }
+        )
     # NetworkX stops at N * tol: keep the same global numerical accuracy as
     # dataset size grows instead of allowing more error on larger graphs.
     frame["pagerank"] = pd.Series(

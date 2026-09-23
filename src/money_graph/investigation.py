@@ -1,5 +1,6 @@
 """On-demand graph evidence and bounded, reproducible what-if experiments."""
 
+import math
 import random
 from typing import Any
 
@@ -78,7 +79,7 @@ def node_evidence(result: dict[str, Any], gid: str) -> dict[str, Any]:
 def resilience(result: dict[str, Any], count: int) -> dict[str, Any]:
     graph = graph_from_result(result)
     original = list(nx.weakly_connected_components(graph))
-    turnover = sum(e["sum_kzt"] for e in result["edges"])
+    turnover = math.fsum(e["sum_kzt"] for e in result["edges"])
     eligible = sorted((g for g in graph if graph.degree(g) > 0), key=int)
     count = min(count, len(eligible))
 
@@ -88,7 +89,7 @@ def resilience(result: dict[str, Any], count: int) -> dict[str, Any]:
         sizes = [len(c) for c in nx.weakly_connected_components(remaining)]
         pairs = sum(s * (s - 1) // 2 for s in sizes)
         baseline_pairs = sum((s := len(c - excluded)) * (s - 1) // 2 for c in original)
-        removed_flow = sum(
+        removed_flow = math.fsum(
             e["sum_kzt"] for e in result["edges"] if e["src"] in excluded or e["dst"] in excluded
         )
         return {
