@@ -6,14 +6,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECK_PATHS = [
-    "src",
-    "tests",
-    "analyze.py",
-    "scripts/start.py",
-    "scripts/verify.py",
-    "scripts/_runner.py",
-]
+CHECK_PATHS = ["src", "tests", "analyze.py", "scripts"]
 
 
 class RunnerError(Exception):

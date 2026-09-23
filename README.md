@@ -108,7 +108,7 @@ Linux, Windows и macOS; полный frontend/browser workflow на Linux; от
 Из корня репозитория на Windows/macOS/Linux:
 
 ```text
-uv run --frozen python scripts/start.py --data ./data/data --port 3010
+uv run --frozen --no-dev python scripts/start.py --data ./data/data --port 3010
 ```
 
 Откройте **http://127.0.0.1:3010**. Скрипт устанавливает зависимости из lockfiles,
@@ -136,6 +136,8 @@ Bash-обёртки `scripts/start.sh` и `scripts/verify.sh` сохранены
 - Сохранение выбранного расчёта после обновления страницы и перезапуска сервиса.
 
 ![Синтетический пример: направленный граф и объяснение роли узла](docs/images/demo.png)
+
+[Посмотреть тёмную тему](docs/images/demo-dark.png).
 
 Основной сценарий: загрузите три файла → откройте TOP → объясните роль через
 факты → найдите произвольный `gid` → покажите связи/сообщество → скачайте CSV.

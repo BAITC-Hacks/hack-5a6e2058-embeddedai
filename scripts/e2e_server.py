@@ -1,4 +1,5 @@
 """Isolated synthetic server for reproducible browser acceptance checks."""
+
 import tempfile
 from pathlib import Path
 

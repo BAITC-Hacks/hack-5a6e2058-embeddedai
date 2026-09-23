@@ -64,13 +64,17 @@ def analyze_inputs(args: argparse.Namespace) -> dict:
         return analyze(source, args.rules)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, *, analyze_only: bool = False) -> None:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Граф денег — воспроизводимый анализ")
-    commands = parser.add_subparsers(dest="command", required=True)
-    analyze_cmd = commands.add_parser("analyze")
+    if analyze_only:
+        parser.set_defaults(command="analyze")
+        analyze_cmd = parser
+    else:
+        commands = parser.add_subparsers(dest="command", required=True)
+        analyze_cmd = commands.add_parser("analyze")
     source = analyze_cmd.add_mutually_exclusive_group(required=True)
     source.add_argument("--data", type=Path, help="Папка nodes/edges/transactions.parquet")
     source.add_argument(
@@ -80,12 +84,13 @@ def main(argv: list[str] | None = None) -> None:
     analyze_cmd.add_argument("--transactions", type=Path, help="Путь к файлу транзакций")
     analyze_cmd.add_argument("--out", type=Path, default=Path("artifacts"))
     analyze_cmd.add_argument("--rules", type=Path)
-    demo_cmd = commands.add_parser("demo")
-    demo_cmd.add_argument("--out", type=Path, default=Path("var/demo-data"))
-    serve_cmd = commands.add_parser("serve")
-    serve_cmd.add_argument("--data", type=Path)
-    serve_cmd.add_argument("--host", default="127.0.0.1")
-    serve_cmd.add_argument("--port", type=port_number, default=os.getenv("PORT", "3000"))
+    if not analyze_only:
+        demo_cmd = commands.add_parser("demo")
+        demo_cmd.add_argument("--out", type=Path, default=Path("var/demo-data"))
+        serve_cmd = commands.add_parser("serve")
+        serve_cmd.add_argument("--data", type=Path)
+        serve_cmd.add_argument("--host", default="127.0.0.1")
+        serve_cmd.add_argument("--port", type=port_number, default=os.getenv("PORT", "3000"))
     args = parser.parse_args(argv)
     if args.command == "analyze":
         if args.data is not None and (args.edges is not None or args.transactions is not None):

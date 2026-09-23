@@ -8,7 +8,6 @@ not relax upload limits or claim that the full pipeline supports a million nodes
 import argparse
 import hashlib
 import json
-import resource
 import statistics
 import subprocess
 import sys
@@ -20,6 +19,17 @@ import numpy as np
 import pandas as pd
 
 from money_graph.pipeline import EXPORTS, analyze, write_result
+
+try:
+    import resource
+except ImportError:
+    resource = None  # type: ignore[assignment]
+
+
+def peak_rss_mib() -> float:
+    if resource is None or sys.platform != "linux":
+        raise RuntimeError("RSS benchmark requires Linux; the application remains cross-platform")
+    return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 2)
 
 
 def create_layered_dataset(directory: Path, size: int) -> None:
@@ -87,7 +97,7 @@ def measure(source: Path, output: Path) -> dict:
         "analysis_seconds": round(analyzed - start, 4),
         "total_seconds": round(finished - start, 4),
         # Linux ru_maxrss is KiB; includes imports and generation in this worker.
-        "peak_rss_mib": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 2),
+        "peak_rss_mib": peak_rss_mib(),
         "csv_sha256": {
             name: hashlib.sha256((output / name).read_bytes()).hexdigest() for name in EXPORTS
         },
@@ -128,7 +138,7 @@ def probe_csr(size: int = 1_000_000) -> dict:
             for matrix in (graph, reverse)
             for array in (matrix.data, matrix.indices, matrix.indptr)
         ),
-        "peak_rss_mib": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 2),
+        "peak_rss_mib": peak_rss_mib(),
         "mass_sum": float(updated.sum()),
     }
 
@@ -146,6 +156,10 @@ def main() -> None:
     )
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if resource is None or sys.platform != "linux":
+        parser.error(
+            "This RSS benchmark requires Linux; use scripts/verify.py for application checks"
+        )
     if not 1 <= args.repeat <= 10:
         parser.error("--repeat must be between 1 and 10")
     if any(not 100 <= n <= 10000 for n in args.nodes):

@@ -36,6 +36,7 @@ AGENTS.md
 
 # Runtime state and local browser checks
 /var/
+/output/
 /test-results/
 /playwright-report/
 /artifacts/result.json

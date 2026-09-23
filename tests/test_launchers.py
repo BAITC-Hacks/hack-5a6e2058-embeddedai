@@ -1,6 +1,7 @@
 import importlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -48,6 +49,62 @@ def test_script_without_installed_packages_has_an_actionable_error(tmp_path):
     assert process.returncode == 2
     assert "uv run --frozen --no-dev" in process.stderr
     assert "Traceback" not in process.stderr
+
+
+def test_json_and_csv_are_utf8_under_legacy_process_encodings(tmp_path):
+    source = tmp_path / "input"
+    create_demo(source)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "analyze.py"),
+            "--data",
+            str(source),
+            "--out",
+            str(tmp_path / "output"),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        env=os.environ
+        | {
+            "LC_ALL": "C",
+            "PYTHONCOERCECLOCALE": "0",
+            "PYTHONUTF8": "0",
+            "PYTHONIOENCODING": "cp1252",
+        },
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert json.loads(result.stdout.decode("utf-8"))["n_nodes"] == 80
+    report = json.loads((tmp_path / "output/run_report.json").read_text(encoding="utf-8"))
+    assert "Роли" in " ".join(report["warnings"])
+    assert "≥" in (tmp_path / "output/nodes_roles.csv").read_text(encoding="utf-8")
+
+
+def test_pip_requirements_are_the_exact_runtime_export_of_uv_lock():
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("Lockfile export consistency is checked by the uv verification command")
+    result = subprocess.run(
+        [
+            uv,
+            "export",
+            "--frozen",
+            "--no-dev",
+            "--no-emit-project",
+            "--format",
+            "requirements-txt",
+            "--no-header",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert result.returncode == 0, result.stderr
+    lines = (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    while lines and lines[0].startswith("#"):
+        lines.pop(0)
+    assert "\n".join(lines).strip() == result.stdout.strip()
 
 
 @pytest.fixture()
