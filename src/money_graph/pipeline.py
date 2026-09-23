@@ -664,9 +664,9 @@ def _validate_result(result: dict[str, Any]) -> None:
                     and 0 < group["amount_kzt"] <= direction["q1_kzt"],
                     "repeat threshold",
                 )
-                key = (group["date"], group["direction"], group["amount_kzt"])
-                require(key not in seen_groups, "repeat duplicate groups")
-                seen_groups.add(key)
+                group_identity = (group["date"], group["direction"], group["amount_kzt"])
+                require(group_identity not in seen_groups, "repeat duplicate groups")
+                seen_groups.add(group_identity)
                 observed = by_date[group["date"]]
                 counterparts = observed["senders" if group["direction"] == "in" else "receivers"]
                 require(
@@ -682,9 +682,9 @@ def _validate_result(result: dict[str, Any]) -> None:
                 pair = (group["date"], group["direction"])
                 grouped_counts[pair] += group["n_tx"]
                 grouped_totals[pair].append(group["total_kzt"])
-            for (when, direction), count in grouped_counts.items():
+            for (when, direction), grouped_count in grouped_counts.items():
                 require(
-                    count <= by_date[when][f"{direction}_tx"]
+                    grouped_count <= by_date[when][f"{direction}_tx"]
                     and math.fsum(grouped_totals[(when, direction)])
                     <= by_date[when][f"{direction}_kzt"] + 0.01,
                     "repeat daily bounds",
