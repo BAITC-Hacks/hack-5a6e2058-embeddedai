@@ -175,3 +175,87 @@ export interface CommunityGraph {
   nodes: Cluster[];
   edges: { src: number; dst: number; sum_kzt: number; n_edges: number }[];
 }
+
+export interface NodeSummary {
+  gid: string;
+  role: string;
+  role_score: number;
+  priority_score: number;
+  rank: number;
+  cluster_id: number;
+  depth: number;
+  is_seed: boolean;
+  in_deg: number;
+  out_deg: number;
+  in_kzt: number;
+  out_kzt: number;
+  volume: number;
+  evidence: string;
+  n_anomaly_signals: number;
+}
+export interface QueueResponse {
+  nodes: NodeSummary[];
+  total: number;
+  matched: number;
+  offset: number;
+  limit: number;
+}
+export interface AssistantResponse {
+  answer: string;
+  claims: { text: string; gids: string[] }[];
+  nodes: { gid: string; role: string; evidence: string }[];
+  facts: unknown[];
+  limitations: string[];
+  model: string;
+  usage: unknown;
+  query: unknown;
+}
+export interface RobustnessNode {
+  gid: string;
+  baseline_role: string;
+  assessed: boolean;
+  unchanged_fraction: number | null;
+  alternatives: { role: string; scenario_count: number }[];
+  changed_scenarios: string[];
+}
+export interface Robustness {
+  version: string;
+  caveat: string;
+  roles: {
+    n_nodes: number;
+    n_active_nodes: number;
+    scenario_count: number;
+    minimum_unchanged_fraction: number;
+    scenarios: {
+      id: string;
+      label: string;
+      unchanged_fraction: number | null;
+      changed_nodes: number;
+      transitions: { from_role: string; to_role: string; count: number }[];
+    }[];
+    nodes: RobustnessNode[];
+    top20: RobustnessNode[];
+  };
+  communities: {
+    status: "complete" | "limited" | "not_applicable";
+    n_active_nodes: number;
+    excluded_isolates: number;
+    scenario_count: number;
+    minimum_adjusted_rand: number | null;
+    scenarios: {
+      id: string;
+      seed: number;
+      resolution: number;
+      n_communities: number;
+      adjusted_rand: number;
+    }[];
+    top20: {
+      gid: string;
+      assessed: boolean;
+      baseline_cluster_id: number;
+      mean_membership_jaccard: number | null;
+      minimum_membership_jaccard: number | null;
+    }[];
+    warnings: string[];
+  };
+}

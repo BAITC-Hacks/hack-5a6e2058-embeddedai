@@ -7,6 +7,8 @@ import re
 import shutil
 import tempfile
 import time
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,51 @@ class CorruptRun(Exception):
 
 class ObsoleteRun(Exception):
     pass
+
+
+class ResultCache:
+    """Bounded read-only snapshots, invalidated on replacement, edits or deletion.
+
+    Callers must not mutate returned dictionaries. Fingerprints are checked on
+    every request, so caching never bypasses rules or corrupt-file recovery.
+    """
+
+    def __init__(self, directory: Path, rules: dict[str, Any], max_entries: int = 2):
+        self.directory = directory
+        self.rules = rules
+        self.max_entries = max_entries
+        self.entries: OrderedDict[str, tuple[tuple[int, ...], dict[str, Any]]] = OrderedDict()
+        self.lock = threading.RLock()
+
+    def get(self, run_id: str) -> dict[str, Any]:
+        path = run_path(self.directory, run_id) / "result.json"
+        with self.lock:
+            try:
+                stat = path.stat()
+            except FileNotFoundError as exc:
+                self.entries.pop(run_id, None)
+                raise MissingRun from exc
+            except OSError as exc:
+                raise CorruptRun from exc
+            fingerprint = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            cached = self.entries.get(run_id)
+            if cached is not None and cached[0] == fingerprint:
+                self.entries.move_to_end(run_id)
+                return cached[1]
+            self.entries.pop(run_id, None)
+            result = read_result(self.directory, run_id, self.rules)
+            try:
+                after = path.stat()
+            except OSError as exc:
+                raise CorruptRun from exc
+            if fingerprint != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                raise CorruptRun
+            # Avoid retaining an unusually large upload in addition to its active request.
+            if stat.st_size <= 16 * 1024 * 1024:
+                self.entries[run_id] = (fingerprint, result)
+                while len(self.entries) > self.max_entries:
+                    self.entries.popitem(last=False)
+            return result
 
 
 def run_path(directory: Path, run_id: str) -> Path:
