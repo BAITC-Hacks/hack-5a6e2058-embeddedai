@@ -1,13 +1,14 @@
 {
   "name": "money-graph-ui",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "check": "biome check src && tsc --noEmit",
-    "format": "biome check --write src"
+    "format": "biome check --write src",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "cytoscape": "^3.33.0"

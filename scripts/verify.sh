@@ -10,3 +10,5 @@ npm --prefix web ci --no-audit --no-fund
 npm --prefix web run check
 npm --prefix web run build
 uv run --frozen python scripts/smoke.py
+npm --prefix web exec -- playwright install chromium
+npm --prefix web run test:e2e

@@ -55,7 +55,7 @@ $("app").innerHTML = `
     <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button></div><div><button id="fit" class="icon-button" title="Вместить граф">⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
       <div class="graph-options"><button id="community-map" class="text-button">Обзор сообществ</button><label for="color-mode">Цвет</label><select id="color-mode"><option value="role">По роли</option><option value="cluster">По сообществу</option></select><button id="graph-png" class="text-button">PNG ↓</button></div><div id="edge-info" class="edge-info" hidden></div><div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
       <div id="clusters-view" hidden></div><div id="analysis-view" hidden></div>
-      <div class="legend">${Object.entries(labels)
+      <div id="graph-legend" class="legend">${Object.entries(labels)
         .map(([key, label]) => `<span><i style="background:${colors[key]}"></i>${label}</span>`)
         .join("")}<span class="legend-note">◆ seed · пунктир — граница наблюдения</span></div>
     </section>
@@ -157,6 +157,7 @@ function resetOtherFilters(keep = "") {
 async function loadGraph(gid?: string, full = false) {
   const sequence = ++graphSequence;
   communityMode = false;
+  updateLegend();
   $("edge-info").hidden = true;
   const params = new URLSearchParams({ limit: full ? "10000" : "350" });
   if (gid) params.set("gid", gid);
@@ -334,6 +335,7 @@ $("community-map").onclick = () => {
   void showCommunityMap().catch(showError);
 };
 $("color-mode").onchange = () => {
+  updateLegend();
   if (!communityMode)
     cy?.nodes().forEach((node) => {
       node.data(
@@ -441,6 +443,7 @@ async function showCommunityMap() {
   if (sequence !== graphSequence) return;
   switchTab(false);
   communityMode = true;
+  updateLegend();
   $("edge-info").hidden = true;
   $("graph-empty").hidden = true;
   $("graph-count").textContent = `${result.nodes.length} сообществ · нажмите, чтобы раскрыть узлы`;
@@ -499,4 +502,14 @@ async function showCommunityMap() {
       `Сообщество #${e.src} → #${e.dst}: ${money(e.sum_kzt)} · ${e.n_edges} связей`;
     $("edge-info").hidden = false;
   });
+}
+
+function updateLegend() {
+  $("graph-legend").innerHTML = communityMode
+    ? "<span>Размер — число участников · цвет — сообщество · стрелка — агрегированный поток</span>"
+    : $<HTMLSelectElement>("color-mode").value === "cluster"
+      ? "<span>Цвет — сообщество · размер — приоритет · ◆ seed · пунктир — граница</span>"
+      : `${Object.entries(labels)
+          .map(([key, label]) => `<span><i style="background:${colors[key]}"></i>${label}</span>`)
+          .join("")}<span class="legend-note">◆ seed · пунктир — граница наблюдения</span>`;
 }

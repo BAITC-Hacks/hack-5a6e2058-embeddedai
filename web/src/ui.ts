@@ -50,4 +50,4 @@ export function download(name: string, text: string, type = "text/markdown;chars
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-export const communityColor = (id: number) => `hsl(${(id * 137.508) % 360} 48% 48%)`;
+export const communityColor = (id: number) => `hsl(${Math.round((id * 137.508) % 360)}, 48%, 48%)`;
