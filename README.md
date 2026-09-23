@@ -100,6 +100,7 @@ pytest, TypeScript, production-сборка и smoke-test собранного �
 6. Скачайте три CSV. В `nodes_roles.csv` должен быть каждый исходный `gid`.
 
 Подробный сценарий: [docs/DEMO.md](docs/DEMO.md).
+Результаты реально выполненных проверок: [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Архитектура и технологии
 
