@@ -241,3 +241,25 @@ uv run --frozen --no-dev python scripts/start.py --data ./data/data --port 3010
 ноутбуке. Фактически выполненные прогоны и ограничения указаны в
 [VALIDATION_05.md](VALIDATION_05.md). GitHub CI отключён по запросу владельца;
 локальные команды проверки работают независимо от него.
+
+## Независимая проверка готовых файлов
+
+После команды пайплайна можно проверить контракт CSV и совпадение с сырьём:
+
+```text
+uv run --frozen --no-dev python scripts/check_submission.py --out artifacts --data data/data
+```
+
+Без `--data` проверяются сами выгрузки и имеющиеся JSON-снимок/отчёт; достаточно
+стандартной библиотеки Python. На Linux/macOS это проверено командой
+`python3 -S scripts/check_submission.py --out artifacts` — пакеты из site-packages
+не загружаются. На Windows используйте `py -3 -S scripts/check_submission.py --out artifacts`.
+Проверка не переписывает результаты; успех возвращает JSON и код 0, ошибка — код 2.
+
+Для объяснения произвольного узла без браузера:
+
+```text
+uv run --frozen --no-dev python scripts/demo_nodes.py --result artifacts/result.json --gid 100000003684369100
+```
+
+Примеры и сохранение нескольких карточек: [DEMO_NODES.md](DEMO_NODES.md).

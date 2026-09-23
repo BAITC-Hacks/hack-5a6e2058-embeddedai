@@ -10,6 +10,7 @@ import time
 from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
+from statistics import median
 from typing import Any, cast
 
 import networkx as nx
@@ -332,6 +333,11 @@ def _validate_result(result: dict[str, Any]) -> None:
         "report",
     )
     require(report["rules"].get("version") == report["rules_version"], "rules_version")
+    require(
+        "result_version" not in report
+        or (integer(report["result_version"], 1) and report["result_version"] <= RESULT_VERSION),
+        "result_version",
+    )
     weights = report["rules"]["priority_weights"]
     metrics = {"pagerank", "betweenness", "seed_reach", "in_deg", "out_deg", "volume"}
     require(isinstance(weights, dict) and set(weights) == metrics, "priority_weights")
@@ -379,6 +385,7 @@ def _validate_result(result: dict[str, Any]) -> None:
         ),
         "pass_through": lambda value: value is None or number(value),
     }
+    pattern_counts: Counter[str] = Counter()
     for row in nodes:
         fields(row, node_checks, "node")
         bounds = row["rank_range"]
@@ -453,6 +460,20 @@ def _validate_result(result: dict[str, Any]) -> None:
             "daily dates",
         )
         if report.get("result_version") == RESULT_VERSION or "patterns" in temporal_data:
+            daily = temporal_data["daily"]
+            by_date = {day["date"]: day for day in daily}
+            for direction in ("in", "out"):
+                require(
+                    sum(day[f"{direction}_tx"] for day in daily) == row[f"{direction}_tx"],
+                    "temporal transaction totals",
+                )
+            require(
+                all(
+                    day["senders"] <= day["in_tx"] and day["receivers"] <= day["out_tx"]
+                    for day in daily
+                ),
+                "temporal counterparty counts",
+            )
             patterns = temporal_data["patterns"]
             fields(patterns, {"version": lambda v: v == "1", "caveat": text}, "temporal.patterns")
             activity = patterns["activity"]
@@ -470,9 +491,31 @@ def _validate_result(result: dict[str, Any]) -> None:
                 },
                 "patterns.activity",
             )
+            baseline = (
+                float(median(day["in_tx"] + day["out_tx"] for day in daily)) if daily else None
+            )
+            threshold = max(3 * baseline, baseline + 5) if baseline is not None else None
+            assessed = len(daily) >= 7
             require(
                 activity["active_days"] == len(dates)
-                and activity["spike_day_count"] >= len(activity["spike_days"]),
+                and activity["status"] == ("assessed" if assessed else "insufficient_history")
+                and activity["baseline_median_tx"] == baseline
+                and activity["threshold_tx"] == threshold,
+                "activity baseline/status",
+            )
+            expected_spikes = sorted(
+                (
+                    day
+                    for day in daily
+                    if assessed
+                    and threshold is not None
+                    and day["in_tx"] + day["out_tx"] > threshold
+                ),
+                key=lambda day: (-(day["in_tx"] + day["out_tx"]), day["date"]),
+            )
+            require(
+                activity["spike_day_count"] == len(expected_spikes)
+                and len(activity["spike_days"]) == min(5, len(expected_spikes)),
                 "activity counts",
             )
             for spike in activity["spike_days"]:
@@ -491,9 +534,24 @@ def _validate_result(result: dict[str, Any]) -> None:
                 require(
                     activity["status"] == "assessed"
                     and number(activity["threshold_tx"])
-                    and spike["n_tx"] > activity["threshold_tx"],
+                    and spike["n_tx"] > activity["threshold_tx"]
+                    and spike["n_tx"] == spike["in_tx"] + spike["out_tx"],
                     "activity threshold",
                 )
+                observed = by_date[spike["date"]]
+                require(
+                    all(spike[key] == observed[key] for key in ("in_tx", "out_tx"))
+                    and all(
+                        math.isclose(spike[key], observed[key], rel_tol=0, abs_tol=0.01)
+                        for key in ("in_kzt", "out_kzt")
+                    ),
+                    "activity spike evidence",
+                )
+            require(
+                [day["date"] for day in activity["spike_days"]]
+                == [day["date"] for day in expected_spikes[:5]],
+                "activity spike order",
+            )
             sync = patterns["synchronous"]
             fields(
                 sync,
@@ -504,7 +562,15 @@ def _validate_result(result: dict[str, Any]) -> None:
                 },
                 "patterns.synchronous",
             )
-            require(sync["day_count"] >= len(sync["days"]), "synchronous count")
+            expected_sync = sorted(
+                (day for day in daily if day["senders"] >= 3),
+                key=lambda day: (-day["senders"], -day["in_kzt"], day["date"]),
+            )
+            require(
+                sync["day_count"] == len(expected_sync)
+                and len(sync["days"]) == min(5, len(expected_sync)),
+                "synchronous count",
+            )
             for signal in sync["days"]:
                 fields(
                     signal,
@@ -515,6 +581,25 @@ def _validate_result(result: dict[str, Any]) -> None:
                         "in_kzt": number,
                     },
                     "synchronous day",
+                )
+                observed = by_date[signal["date"]]
+                require(
+                    signal["senders"] == observed["senders"]
+                    and signal["in_tx"] == observed["in_tx"]
+                    and math.isclose(signal["in_kzt"], observed["in_kzt"], rel_tol=0, abs_tol=0.01),
+                    "synchronous evidence",
+                )
+            require(
+                len({day["date"] for day in sync["days"]}) == len(sync["days"]),
+                "synchronous duplicate dates",
+            )
+            for actual, expected in zip(sync["days"], expected_sync[:5], strict=True):
+                # Daily summaries are rounded to tiyn; equally rounded amounts
+                # cannot establish which unrounded total was microscopically larger.
+                require(
+                    actual["senders"] == expected["senders"]
+                    and math.isclose(actual["in_kzt"], expected["in_kzt"], rel_tol=0, abs_tol=0.01),
+                    "synchronous example ordering",
                 )
             repeat = patterns["repeated_amounts"]
             fields(
@@ -528,7 +613,12 @@ def _validate_result(result: dict[str, Any]) -> None:
                 },
                 "patterns.repeated_amounts",
             )
-            require(repeat["group_count"] >= len(repeat["groups"]), "repeat count")
+            require(
+                len(repeat["groups"]) == min(5, repeat["group_count"])
+                and repeat["group_count"]
+                <= sum(day[f"{direction}_tx"] // 3 for day in daily for direction in ("in", "out")),
+                "repeat count",
+            )
             for direction in ("in", "out"):
                 fields(
                     repeat["directions"][direction],
@@ -539,6 +629,21 @@ def _validate_result(result: dict[str, Any]) -> None:
                     },
                     "repeat.direction",
                 )
+                summary = repeat["directions"][direction]
+                enough = row[f"{direction}_tx"] >= 8
+                require(
+                    summary["n_transactions"] == row[f"{direction}_tx"]
+                    and summary["status"] == ("assessed" if enough else "insufficient_transactions")
+                    and (
+                        (number(summary["q1_kzt"]) and summary["q1_kzt"] > 0)
+                        if enough
+                        else summary["q1_kzt"] is None
+                    ),
+                    "repeat direction evidence",
+                )
+            seen_groups = set()
+            grouped_counts: Counter[tuple[str, str]] = Counter()
+            grouped_totals: dict[tuple[str, str], list[float]] = defaultdict(list)
             for group in repeat["groups"]:
                 fields(
                     group,
@@ -556,9 +661,51 @@ def _validate_result(result: dict[str, Any]) -> None:
                 require(
                     direction["status"] == "assessed"
                     and number(direction["q1_kzt"])
-                    and group["amount_kzt"] <= direction["q1_kzt"],
+                    and 0 < group["amount_kzt"] <= direction["q1_kzt"],
                     "repeat threshold",
                 )
+                key = (group["date"], group["direction"], group["amount_kzt"])
+                require(key not in seen_groups, "repeat duplicate groups")
+                seen_groups.add(key)
+                observed = by_date[group["date"]]
+                counterparts = observed["senders" if group["direction"] == "in" else "receivers"]
+                require(
+                    group["counterparties"] <= min(counterparts, group["n_tx"])
+                    and math.isclose(
+                        group["total_kzt"],
+                        group["amount_kzt"] * group["n_tx"],
+                        rel_tol=0,
+                        abs_tol=0.01,
+                    ),
+                    "repeat group evidence",
+                )
+                pair = (group["date"], group["direction"])
+                grouped_counts[pair] += group["n_tx"]
+                grouped_totals[pair].append(group["total_kzt"])
+            for (when, direction), count in grouped_counts.items():
+                require(
+                    count <= by_date[when][f"{direction}_tx"]
+                    and math.fsum(grouped_totals[(when, direction)])
+                    <= by_date[when][f"{direction}_kzt"] + 0.01,
+                    "repeat daily bounds",
+                )
+            require(
+                repeat["groups"]
+                == sorted(
+                    repeat["groups"],
+                    key=lambda group: (
+                        -group["n_tx"],
+                        -group["total_kzt"],
+                        group["date"],
+                        group["direction"],
+                        group["amount_kzt"],
+                    ),
+                ),
+                "repeat group order",
+            )
+            pattern_counts["n_activity_spike_nodes"] += activity["spike_day_count"] > 0
+            pattern_counts["n_synchronous_nodes"] += sync["day_count"] > 0
+            pattern_counts["n_repeated_amount_nodes"] += repeat["group_count"] > 0
         profile = row["anomaly_profile"]
         fields(
             profile,
@@ -594,6 +741,19 @@ def _validate_result(result: dict[str, Any]) -> None:
                 "anomaly signal evidence",
             )
             seen_metrics.add(signal["metric"])
+    if report.get("result_version") == RESULT_VERSION:
+        fields(
+            report,
+            {
+                "temporal_patterns_version": lambda value: value == "1",
+                "n_activity_spike_nodes": integer,
+                "n_synchronous_nodes": integer,
+                "n_repeated_amount_nodes": integer,
+            },
+            "temporal report",
+        )
+        for key in ("n_activity_spike_nodes", "n_synchronous_nodes", "n_repeated_amount_nodes"):
+            require(report[key] == pattern_counts[key], key)
     by_id = {row["gid"]: row for row in nodes}
     require(len(by_id) == len(nodes), "duplicate gid")
     n_active = sum(row["in_deg"] + row["out_deg"] > 0 for row in nodes)
