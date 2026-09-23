@@ -1,10 +1,32 @@
 import cytoscape, { type Core } from "cytoscape";
 import "./style.css";
-import type { Cluster, Edge, GraphResponse, NodeDetail, Report, TopNode } from "./types";
+import { downloadDossier, openInvestigation, renderAnalysis, timeline } from "./analysis";
+import type {
+  Cluster,
+  CommunityGraph,
+  Edge,
+  GraphResponse,
+  NodeDetail,
+  Report,
+  TopNode,
+} from "./types";
+import {
+  $,
+  api,
+  colors,
+  communityColor,
+  escapeHtml,
+  labels,
+  metricLabels,
+  money,
+  number,
+  percent,
+} from "./ui";
 
-import { $, api, labels, colors, number, money, percent, escapeHtml, metricLabels, communityColor } from "./ui";
-import { timeline, openInvestigation, renderAnalysis, downloadDossier } from "./analysis";
 let runId = "";
+let currentReport: Report;
+let runSequence = 0;
+let communityMode = false;
 let cy: Core | undefined;
 let graphSequence = 0;
 let detailSequence = 0;
@@ -30,9 +52,9 @@ $("app").innerHTML = `
       <button id="reset" class="text-button">Сбросить фильтры</button>
       <div class="panel-heading list-heading"><h2>Приоритет проверки</h2><span class="tag small">TOP 50</span></div><div id="top-list" class="top-list"></div>
     </aside>
-    <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button></div><div><button id="fit" class="icon-button" title="Вместить граф">⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
-      <div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
-      <div id="clusters-view" hidden></div>
+    <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button></div><div><button id="fit" class="icon-button" title="Вместить граф">⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
+      <div class="graph-options"><button id="community-map" class="text-button">Обзор сообществ</button><label for="color-mode">Цвет</label><select id="color-mode"><option value="role">По роли</option><option value="cluster">По сообществу</option></select><button id="graph-png" class="text-button">PNG ↓</button></div><div id="edge-info" class="edge-info" hidden></div><div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
+      <div id="clusters-view" hidden></div><div id="analysis-view" hidden></div>
       <div class="legend">${Object.entries(labels)
         .map(([key, label]) => `<span><i style="background:${colors[key]}"></i>${label}</span>`)
         .join("")}<span class="legend-note">◆ seed · пунктир — граница наблюдения</span></div>
@@ -40,7 +62,8 @@ $("app").innerHTML = `
     <aside id="detail" class="detail"><div class="empty-card"><span class="empty-symbol">⌘</span><h2>За каждым узлом — факты</h2><p>Выберите узел на карте или в списке приоритетов. Здесь появятся его потоки, роль и основания для проверки.</p><div class="subtle-box">Роль — гипотеза по наблюдаемым данным, а не вывод о виновности.</div></div></aside>
   </section><footer><span>EmbeddedAi · HackAlem 2026</span><span id="limitations">4 уровня · только внутрибанковские переводы · порог 5 000 ₸</span></footer></main>
   <dialog id="upload-dialog"><form id="upload-form"><div class="dialog-title"><h2>Новый набор данных</h2><button type="button" id="upload-close" class="icon-button" aria-label="Закрыть">×</button></div><p>Загрузите три файла организаторов. Исходные ID сохраняются без округления.</p>${["nodes", "edges", "transactions"].map((name) => `<label class="file-label">${name}.parquet<input type="file" name="${name}" accept=".parquet" required></label>`).join("")}<p class="fine-print">До 10 МБ на файл. Результаты доступны по ссылке расчёта до 24 часов или до удаления старых запусков.</p><div id="upload-error" class="alert" hidden></div><button id="analyze-button" class="button primary" type="submit">Рассчитать граф →</button></form></dialog>
-  <dialog id="method-dialog"><div class="dialog-title"><h2>Объяснимый расчёт</h2><button id="method-close" class="icon-button" aria-label="Закрыть">×</button></div><p>Приоритет проверки: 25% PageRank + 25% посредничество + 20% охват seed + 15% входящих связей + 15% исходящих. Признаки нормированы по положительным значениям.</p><p>Роли присваиваются формальными правилами v1.0. Связующий узел: ≥2 seed-предка, ≥3 плательщика, ≥2 получателя и высокое посредничество. Распределитель: ≥10 получателей. Транзит: отношение выхода к входу 0,8–1,2. Консолидатор: ≥3 плательщика и отношение ≤0,2. Конечный в выборке: вход без наблюдаемого выхода.</p><p>У seed и узлов на границе обхода роли не выводятся из отношения потоков. Поддержка роли — эвристический показатель, не вероятность виновности. При пересечении правил приоритет: связующий → распределитель → транзит → консолидатор → конечный → периферия.</p><p>Сообщества: Louvain по суммам потоков в обоих направлениях. Узлы без рёбер сохраняются как отдельные сообщества. Ни номера кластеров, ни роли не являются подтверждением существования преступной группы.</p></dialog>`;
+  <dialog id="method-dialog"><div class="dialog-title"><h2>Объяснимый расчёт</h2><button id="method-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="method-content"></div></dialog>
+  <dialog id="investigation-dialog" class="wide-dialog"><div class="dialog-title"><h2 id="investigation-title">Доказательная карточка</h2><button id="investigation-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="investigation-content"></div></dialog>`;
 
 function alert(message: string) {
   $("alert").textContent = message;
@@ -61,12 +84,19 @@ function showError(error: unknown) {
 }
 
 async function loadRun(id: string) {
+  const sequence = ++runSequence;
+  ++detailSequence;
+  ++graphSequence;
   const [report, top, clusters] = await Promise.all([
     api<Report>(`/api/runs/${id}`),
     api<TopNode[]>(`/api/runs/${id}/top`),
     api<Cluster[]>(`/api/runs/${id}/clusters`),
   ]);
+  if (sequence !== runSequence) return;
+  currentReport = report;
   runId = id;
+  renderAnalysis(report, id, (gid) => selectNode(gid).catch(showError));
+  renderMethod(report);
   localStorage.setItem("money-graph-run", id);
   history.replaceState(null, "", `?run=${id}`);
   currentGid = "";
@@ -126,6 +156,8 @@ function resetOtherFilters(keep = "") {
 
 async function loadGraph(gid?: string, full = false) {
   const sequence = ++graphSequence;
+  communityMode = false;
+  $("edge-info").hidden = true;
   const params = new URLSearchParams({ limit: full ? "10000" : "350" });
   if (gid) params.set("gid", gid);
   else {
@@ -147,7 +179,10 @@ async function loadGraph(gid?: string, full = false) {
       data: {
         id: n.gid,
         ...n,
-        color: colors[n.role],
+        color:
+          $<HTMLSelectElement>("color-mode").value === "cluster"
+            ? communityColor(n.cluster_id)
+            : colors[n.role],
         size: 13 + n.priority_score * 20,
         label: n.gid,
       },
@@ -215,6 +250,11 @@ async function loadGraph(gid?: string, full = false) {
       idealEdgeLength: () => 75,
     } as cytoscape.LayoutOptions,
   });
+  cy.on("tap", "edge", (event) => {
+    const e = event.target.data();
+    $("edge-info").textContent = `${e.src} → ${e.dst} · ${money(e.sum_kzt)} · ${e.n_tx} переводов`;
+    $("edge-info").hidden = false;
+  });
   cy.on("tap", "node", (event) => {
     void selectNode(String(event.target.id()), false).catch(showError);
   });
@@ -241,17 +281,21 @@ async function selectNode(gid: string, focusGraph = true) {
   alert("");
   switchTab(false);
   $("detail").innerHTML =
-    `<div class="panel-heading"><h2>Карточка узла</h2><span class="tag small">#${node.rank}</span></div><p class="node-id gid">${node.gid}</p>${roleTag(node.role)}<div class="node-tags"><span>Уровень ${node.depth}</span><button id="node-cluster" class="text-button">Сообщество #${node.cluster_id} ↗</button>${node.is_seed ? '<span class="tag small">SEED</span>' : ""}</div><div class="score-grid"><div><strong>${percent(node.priority_score)}</strong><span>Приоритет проверки</span></div><div><strong>${percent(node.role_score)}</strong><span>Поддержка правила</span></div></div><h3>Почему эта роль</h3><p class="evidence">${escapeHtml(node.evidence)}</p><dl class="node-metrics"><div><dt>Наблюдаемый вход</dt><dd>${money(node.in_kzt)}</dd></div><div><dt>Наблюдаемый выход</dt><dd>${money(node.out_kzt)}</dd></div><div><dt>Плательщики / получатели</dt><dd>${node.in_deg} / ${node.out_deg}</dd></div><div><dt>Переводы: вход / выход</dt><dd>${node.in_tx} / ${node.out_tx}</dd></div><div><dt>Seed-предков</dt><dd>${node.seed_reach}</dd></div></dl><details><summary>Вклад в приоритет и правила</summary>${Object.entries(
+    `<div class="panel-heading"><h2>Карточка узла</h2><span class="tag small">#${node.rank}</span></div><p class="node-id gid">${node.gid}</p>${roleTag(node.role)}<div class="node-tags"><span>Уровень ${node.depth}</span><button id="node-cluster" class="text-button">Сообщество #${node.cluster_id} ↗</button>${node.is_seed ? '<span class="tag small">SEED</span>' : ""}</div><div class="score-grid"><div><strong>${percent(node.priority_score)}</strong><span>Приоритет проверки</span></div><div><strong>${percent(node.role_score)}</strong><span>Поддержка правила</span></div></div><p class="fine-print">Место при изменении весов ±20%: ${node.rank_range[0]}–${node.rank_range[1]}. Не доверительный интервал.</p><h3>Почему эта роль</h3><p class="evidence">${escapeHtml(node.evidence)}</p><dl class="node-metrics"><div><dt>Наблюдаемый вход</dt><dd>${money(node.in_kzt)}</dd></div><div><dt>Наблюдаемый выход</dt><dd>${money(node.out_kzt)}</dd></div><div><dt>Плательщики / получатели</dt><dd>${node.in_deg} / ${node.out_deg}</dd></div><div><dt>Переводы: вход / выход</dt><dd>${node.in_tx} / ${node.out_tx}</dd></div><div><dt>Seed-предков</dt><dd>${node.seed_reach}</dd></div></dl><details><summary>Вклад в приоритет и правила</summary>${Object.entries(
       node.priority_parts,
     )
       .map(
         ([key, value]) =>
-          `<div class="contribution"><span>${escapeHtml(key)}</span><meter min="0" max="0.25" value="${value}"></meter><span>${(value * 100).toFixed(1)} п.п.</span></div>`,
+          `<div class="contribution"><span>${escapeHtml(metricLabels[key] ?? key)}</span><meter min="0" max="0.25" value="${value}"></meter><span>${(value * 100).toFixed(1)} п.п.</span></div>`,
       )
       .join(
         "",
-      )}<p class="fine-print">Совпали: ${node.matched_rules.map((r) => escapeHtml(labels[r])).join(", ") || "конкретная роль не установлена"}. Поддержка не является вероятностью виновности.</p></details>${node.warnings.length ? `<div class="warning-box"><h3>Границы наблюдения</h3><ul>${node.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>` : ""}<details open><summary>Что проверить дальше</summary><ul class="check-list">${node.next_checks.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></details><button id="focus-neighbors" class="button secondary">Показать окружение узла ↗</button><details open><summary>Входящие связи · ${node.in_deg}</summary>${links(node.incoming, true)}</details><details><summary>Исходящие связи · ${node.out_deg}</summary>${links(node.outgoing, false)}</details>`;
+      )}<p class="fine-print">Совпали: ${node.matched_rules.map((r) => escapeHtml(labels[r])).join(", ") || "конкретная роль не установлена"}. Поддержка не является вероятностью виновности.</p></details>${node.warnings.length ? `<div class="warning-box"><h3>Границы наблюдения</h3><ul>${node.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>` : ""}<details open><summary>Что проверить дальше</summary><ul class="check-list">${node.next_checks.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></details><details><summary>Временные признаки · ${node.temporal.active_days} дней</summary>${timeline(node)}</details><button id="investigate-node" class="button primary full-width">Пути, циклы и хронология ↗</button><button id="download-dossier" class="text-button">Скачать справку по узлу ↓</button><button id="focus-neighbors" class="button secondary">Показать окружение узла ↗</button><details open><summary>Входящие связи · ${node.in_deg}</summary>${links(node.incoming, true)}</details><details><summary>Исходящие связи · ${node.out_deg}</summary>${links(node.outgoing, false)}</details>`;
   onNodeButtons($("detail"));
+  $("investigate-node").onclick = () => {
+    void openInvestigation(runId, node, (gid) => selectNode(gid).catch(showError));
+  };
+  $("download-dossier").onclick = () => downloadDossier(node, currentReport);
   $("focus-neighbors").onclick = () => {
     void loadGraph(gid).catch(showError);
   };
@@ -260,21 +304,54 @@ async function selectNode(gid: string, focusGraph = true) {
     $<HTMLSelectElement>("cluster").value = String(node.cluster_id);
     void loadGraph().catch(showError);
   };
-  if (focusGraph) await loadGraph(gid);
+  if (focusGraph || communityMode) await loadGraph(gid);
   cy?.elements().unselect();
   cy?.getElementById(gid).select();
   for (const button of $("top-list").querySelectorAll("button"))
     button.classList.toggle("selected", (button as HTMLElement).dataset.gid === gid);
 }
 function switchTab(clusters: boolean) {
+  $("analysis-view").hidden = true;
+  $("tab-analysis").classList.remove("active");
   $("graph-wrapper").hidden = clusters;
   $("clusters-view").hidden = !clusters;
   $("tab-graph").classList.toggle("active", !clusters);
   $("tab-clusters").classList.toggle("active", clusters);
   if (!clusters) cy?.resize();
 }
+$("investigation-close").onclick = () => $<HTMLDialogElement>("investigation-dialog").close();
+$("tab-analysis").onclick = () => {
+  $("graph-wrapper").hidden = true;
+  $("clusters-view").hidden = true;
+  $("analysis-view").hidden = false;
+  $("tab-graph").classList.remove("active");
+  $("tab-clusters").classList.remove("active");
+  $("tab-analysis").classList.add("active");
+};
 $("tab-graph").onclick = () => switchTab(false);
 $("tab-clusters").onclick = () => switchTab(true);
+$("community-map").onclick = () => {
+  void showCommunityMap().catch(showError);
+};
+$("color-mode").onchange = () => {
+  if (!communityMode)
+    cy?.nodes().forEach((node) => {
+      node.data(
+        "color",
+        $<HTMLSelectElement>("color-mode").value === "cluster"
+          ? communityColor(node.data("cluster_id"))
+          : colors[node.data("role")],
+      );
+    });
+};
+$("graph-png").onclick = () => {
+  if (cy) {
+    const a = document.createElement("a");
+    a.download = "money-graph.png";
+    a.href = cy.png({ full: true, scale: 2, bg: "#ffffff", maxWidth: 4000, maxHeight: 4000 });
+    a.click();
+  }
+};
 $("fit").onclick = () => cy?.fit(undefined, 35);
 $("full-graph").onclick = () => {
   resetOtherFilters();
@@ -284,6 +361,7 @@ $("full-graph").onclick = () => {
 $("reset").onclick = () => {
   resetOtherFilters();
   $<HTMLInputElement>("gid").value = "";
+  switchTab(false);
   void loadGraph().catch(showError);
 };
 $("search-form").onsubmit = (event) => {
@@ -345,3 +423,80 @@ async function init() {
   }
 }
 void init().catch(showError);
+
+function renderMethod(report: Report) {
+  const r = report.rules;
+  $("method-content").innerHTML =
+    `<p>Правила v${escapeHtml(report.rules_version)}. Приоритет: ${Object.entries(
+      r.priority_weights,
+    )
+      .map(([k, w]) => `${percent(w)} ${metricLabels[k]}`)
+      .join(
+        " + ",
+      )}. Используются процентили положительных значений. Объём = max(вход, выход), изоляты получают приоритет 0.</p><p>Связующий узел: ≥${r.coordinator_min_seeds} seed-предков, ≥${r.coordinator_min_in} плательщиков, ≥${r.coordinator_min_out} получателей, процентиль посредничества ≥${r.coordinator_betweenness_percentile}. Распределитель: ≥${r.distributor_min_out} получателей. Объёмный транзит: выход/вход ${r.transit_ratio_min}–${r.transit_ratio_max}. Консолидатор: ≥${r.consolidator_min_in} плательщиков и выход/вход ≤${r.consolidator_ratio_max}. Конечный: положительный вход без наблюдаемого выхода.</p><p>Seed и граница depth=4 не получают роли по отношению потоков или отсутствию выхода. При пересечении правил порядок: связующий → распределитель → транзит → консолидатор → конечный → периферия. Поддержка роли — эвристика, не вероятность виновности.</p><p>Louvain: суммы обоих направлений, resolution=${r.louvain_resolution}, seed=${r.random_seed}. Изоляты сохранены. Номер сообщества не доказывает существование группы.</p><p>Сопоставление поступлений и списаний: FIFO с окном 1–2 календарных дня. Поступления одного дня не сопоставляются с его списаниями. Без времени суток и остатков нельзя доказать происхождение денег.</p>`;
+}
+async function showCommunityMap() {
+  const sequence = ++graphSequence;
+  const result = await api<CommunityGraph>(`/api/runs/${runId}/community-graph`);
+  if (sequence !== graphSequence) return;
+  switchTab(false);
+  communityMode = true;
+  $("edge-info").hidden = true;
+  $("graph-empty").hidden = true;
+  $("graph-count").textContent = `${result.nodes.length} сообществ · нажмите, чтобы раскрыть узлы`;
+  cy?.destroy();
+  cy = cytoscape({
+    container: $("graph"),
+    elements: [
+      ...result.nodes.map((c) => ({
+        data: {
+          id: `c${c.cluster_id}`,
+          cid: c.cluster_id,
+          label: `#${c.cluster_id} · ${c.n_nodes}`,
+          size: 18 + Math.sqrt(c.n_nodes) * 3,
+          color: communityColor(c.cluster_id),
+        },
+      })),
+      ...result.edges.map((e, i) => ({
+        data: { id: `ce${i}`, source: `c${e.src}`, target: `c${e.dst}`, ...e },
+      })),
+    ],
+    style: [
+      {
+        selector: "node",
+        style: {
+          width: "data(size)",
+          height: "data(size)",
+          "background-color": "data(color)",
+          label: "data(label)",
+          "font-size": 10,
+          color: "#20384d",
+          "text-valign": "bottom",
+          "text-margin-y": 5,
+        },
+      },
+      {
+        selector: "edge",
+        style: {
+          "target-arrow-shape": "triangle",
+          "curve-style": "bezier",
+          "line-color": "#a4b9c7",
+          "target-arrow-color": "#a4b9c7",
+          opacity: 0.6,
+        },
+      },
+    ],
+    layout: { name: "cose", animate: false, randomize: false, padding: 35 },
+  });
+  cy.on("tap", "node", (event) => {
+    resetOtherFilters();
+    $<HTMLSelectElement>("cluster").value = String(event.target.data("cid"));
+    void loadGraph().catch(showError);
+  });
+  cy.on("tap", "edge", (event) => {
+    const e = event.target.data();
+    $("edge-info").textContent =
+      `Сообщество #${e.src} → #${e.dst}: ${money(e.sum_kzt)} · ${e.n_edges} связей`;
+    $("edge-info").hidden = false;
+  });
+}

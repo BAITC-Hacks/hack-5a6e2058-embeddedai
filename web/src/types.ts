@@ -40,7 +40,7 @@ export interface NodeDetail extends GraphNode {
 }
 export interface Report {
   sensitivity: Sensitivity;
-  rules: {priority_weights: Record<string, number>; [key: string]: unknown};
+  rules: { priority_weights: Record<string, number>; [key: string]: unknown };
   input_sha256: Record<string, string>;
   n_connected_components: number;
   n_nodes: number;
@@ -88,33 +88,63 @@ export interface GraphResponse {
 }
 
 export interface Day {
-  date: string; in_kzt: number; out_kzt: number; in_tx: number; out_tx: number;
-  senders: number; receivers: number;
+  date: string;
+  in_kzt: number;
+  out_kzt: number;
+  in_tx: number;
+  out_tx: number;
+  senders: number;
+  receivers: number;
 }
 export interface Temporal {
-  daily: Day[]; active_days: number; max_same_day_senders: number; peak_in_share: number;
-  matched_1_2d_kzt: number; matched_1_2d_share: number; same_day_overlap_kzt: number;
+  daily: Day[];
+  active_days: number;
+  max_same_day_senders: number;
+  peak_in_share: number;
+  matched_1_2d_kzt: number;
+  matched_1_2d_share: number;
+  same_day_overlap_kzt: number;
 }
-export interface PathEvidence {gids: string[]; edges: Edge[];}
+export interface PathEvidence {
+  gids: string[];
+  edges: Edge[];
+}
 export interface Investigation {
-  seed_paths: PathEvidence[]; seed_path_count: number;
-  reciprocal: Edge[]; reciprocal_count: number;
-  cycles: PathEvidence[]; repeated_routes: PathEvidence[]; repeated_route_count: number; caveat: string;
+  seed_paths: PathEvidence[];
+  seed_path_count: number;
+  reciprocal: Edge[];
+  reciprocal_count: number;
+  cycles: PathEvidence[];
+  repeated_routes: PathEvidence[];
+  repeated_route_count: number;
+  caveat: string;
 }
 export interface Sensitivity {
-  top_n: number; minimum_top_overlap: number; caveat: string;
-  scenarios: {metric: string; multiplier: number; top_overlap: number}[];
+  top_n: number;
+  minimum_top_overlap: number;
+  caveat: string;
+  scenarios: { metric: string; multiplier: number; top_overlap: number }[];
 }
 export interface Impact {
-  removed_gids: string[]; n_nodes: number; n_edges: number; components: number;
-  largest_component: number; fragmented_pairs_share: number;
-  removed_turnover_kzt: number; removed_turnover_share: number;
+  removed_gids: string[];
+  n_nodes: number;
+  n_edges: number;
+  components: number;
+  largest_component: number;
+  fragmented_pairs_share: number;
+  removed_turnover_kzt: number;
+  removed_turnover_share: number;
 }
 export interface Resilience {
-  count: number; before: Impact; priority: Impact; degree: Impact;
-  random: Record<string, {mean: number; min: number; max: number}>;
-  random_trials: number; caveat: string;
+  count: number;
+  before: Impact;
+  priority: Impact;
+  degree: Impact;
+  random: Record<string, { mean: number; min: number; max: number }>;
+  random_trials: number;
+  caveat: string;
 }
 export interface CommunityGraph {
-  nodes: Cluster[]; edges: {src: number; dst: number; sum_kzt: number; n_edges: number}[];
+  nodes: Cluster[];
+  edges: { src: number; dst: number; sum_kzt: number; n_edges: number }[];
 }

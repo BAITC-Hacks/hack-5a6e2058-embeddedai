@@ -37,13 +37,19 @@ def node_evidence(result: dict[str, Any], gid: str) -> dict[str, Any]:
         if other != gid and graph.has_edge(other, gid)
     ]
     reciprocal.sort(key=lambda e: (-e["sum_kzt"], int(e["src"])))
-    repeated = []
-    for incoming in graph.in_edges(gid, data=True):
-        if incoming[2]["n_tx"] < 2 or incoming[0] == gid:
-            continue
-        for outgoing in graph.out_edges(gid, data=True):
-            if outgoing[2]["n_tx"] >= 2 and outgoing[1] not in (gid, incoming[0]):
-                repeated.append([incoming[0], gid, outgoing[1]])
+    incoming = sorted(
+        (e for e in graph.in_edges(gid, data=True) if e[2]["n_tx"] >= 2 and e[0] != gid),
+        key=lambda e: (-e[2]["sum_kzt"], int(e[0])),
+    )
+    outgoing = sorted(
+        (e for e in graph.out_edges(gid, data=True) if e[2]["n_tx"] >= 2 and e[1] != gid),
+        key=lambda e: (-e[2]["sum_kzt"], int(e[1])),
+    )
+    repeated_count = len(incoming) * len(outgoing) - len(
+        {e[0] for e in incoming} & {e[1] for e in outgoing}
+    )
+    # Bounded examples even for high-degree uploads; the total count stays exact.
+    repeated = [[a[0], gid, b[1]] for a in incoming[:20] for b in outgoing[:20] if a[0] != b[1]]
     repeated.sort(
         key=lambda p: (
             -min(graph[p[0]][gid]["sum_kzt"], graph[gid][p[2]]["sum_kzt"]),
@@ -64,7 +70,7 @@ def node_evidence(result: dict[str, Any], gid: str) -> dict[str, Any]:
         "reciprocal_count": len(reciprocal),
         "cycles": [describe(path) for path in cycles[:5]],
         "repeated_routes": [describe(path) for path in repeated[:10]],
-        "repeated_route_count": len(repeated),
+        "repeated_route_count": repeated_count,
         "caveat": "Пути и циклы подтверждены рёбрами за весь период. Это не доказательство последовательности операций или движения одних и тех же денег.",
     }
 
@@ -96,8 +102,9 @@ def resilience(result: dict[str, Any], count: int) -> dict[str, Any]:
             "removed_turnover_share": round(removed_flow / turnover, 6) if turnover else 0,
         }
 
+    eligible_set = set(eligible)
     ranked = sorted(
-        (n for n in result["nodes"] if n["gid"] in set(eligible)), key=lambda n: n["rank"]
+        (n for n in result["nodes"] if n["gid"] in eligible_set), key=lambda n: n["rank"]
     )
     targeted = measure([n["gid"] for n in ranked[:count]])
     degree = measure(sorted(eligible, key=lambda g: (-graph.degree(g), int(g)))[:count])

@@ -9,6 +9,14 @@
     "check": "biome check src && tsc --noEmit",
     "format": "biome check --write src"
   },
-  "dependencies": { "cytoscape": "^3.33.0" },
-  "devDependencies": { "@types/cytoscape": "^3.21.9", "typescript": "^5.9.0", "vite": "^7.1.0", "@biomejs/biome": "^2.2.0" }
+  "dependencies": {
+    "cytoscape": "^3.33.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@playwright/test": "1.63.0",
+    "@types/cytoscape": "^3.21.9",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0"
+  }
 }

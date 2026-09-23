@@ -34,7 +34,50 @@ def clean(value: Any) -> Any:
 
 
 def read_rules(path: Path | None = None) -> dict[str, Any]:
-    cfg = json.loads((path or ROOT / "config/rules.json").read_text())
+    try:
+        cfg = json.loads((path or ROOT / "config/rules.json").read_text())
+    except (OSError, ValueError) as exc:
+        raise DataError("Не удалось прочитать конфигурацию правил JSON") from exc
+    integers = (
+        "random_seed",
+        "max_depth",
+        "betweenness_samples",
+        "coordinator_min_seeds",
+        "coordinator_min_in",
+        "coordinator_min_out",
+        "distributor_min_out",
+        "consolidator_min_in",
+    )
+    numbers = (
+        "louvain_resolution",
+        "coordinator_betweenness_percentile",
+        "transit_ratio_min",
+        "transit_ratio_max",
+        "consolidator_ratio_max",
+        "incomplete_support_multiplier",
+    )
+    if not isinstance(cfg, dict) or not isinstance(cfg.get("version"), str) or not cfg["version"]:
+        raise DataError("В конфигурации нужна строковая version")
+    if any(
+        type(cfg.get(k)) is not int or cfg[k] < (0 if k == "random_seed" else 1) for k in integers
+    ):
+        raise DataError("Пороги количества и seed должны быть корректными целыми числами")
+    if any(
+        type(cfg.get(k)) not in (int, float) or not math.isfinite(cfg[k]) or cfg[k] < 0
+        for k in numbers
+    ):
+        raise DataError("Пороги правил должны быть конечными неотрицательными числами")
+    if (
+        cfg["max_depth"] != 4
+        or cfg["louvain_resolution"] <= 0
+        or not 0 <= cfg["coordinator_betweenness_percentile"] <= 1
+        or not 0 < cfg["transit_ratio_min"] <= cfg["transit_ratio_max"]
+    ):
+        raise DataError("Некорректные границы правил или глубина (поддерживается 4)")
+    if not isinstance(cfg.get("priority_weights"), dict) or any(
+        type(v) not in (int, float) for v in cfg["priority_weights"].values()
+    ):
+        raise DataError("Веса приоритета должны быть числами")
     weights = cfg["priority_weights"]
     required = {"pagerank", "betweenness", "seed_reach", "in_deg", "out_deg", "volume"}
     if set(weights) != required or any(not math.isfinite(v) or v < 0 for v in weights.values()):

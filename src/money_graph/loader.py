@@ -86,6 +86,8 @@ def validate(nodes: pd.DataFrame, edges: pd.DataFrame, tx: pd.DataFrame) -> None
         tx["date"] = pd.to_datetime(tx.date, errors="raise")
     except Exception as exc:
         raise DataError("transactions.date: некорректная дата") from exc
+    if tx.date.isna().any():
+        raise DataError("transactions.date: пустая или некорректная дата")
     agg = tx.groupby(["src", "dst"]).agg(total=("sum_kzt", "sum"), count=("sum_kzt", "size"))
     merged = edges.merge(agg, on=["src", "dst"], how="outer", indicator=True)
     if not (merged["_merge"] == "both").all():
