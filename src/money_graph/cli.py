@@ -1,6 +1,9 @@
 import argparse
 import json
 import os
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 
 from .demo import create_demo
@@ -39,11 +42,42 @@ def port_number(value: str) -> int:
     return port
 
 
-def main() -> None:
+def analyze_inputs(args: argparse.Namespace) -> dict:
+    """Normalize explicit files without changing or duplicating the calculation path."""
+    sources = (args.data,) if args.data is not None else (args.nodes, args.edges, args.transactions)
+    if args.rules is not None:
+        sources += (args.rules,)
+    output_directory(args.out, sources)
+    if args.data is not None:
+        return analyze(args.data, args.rules)
+    paths = {"nodes": args.nodes, "edges": args.edges, "transactions": args.transactions}
+    if len({path.resolve() for path in paths.values()}) != 3:
+        raise DataError("Укажите три разных входных Parquet-файла")
+    for name, path in paths.items():
+        if not path.is_file():
+            raise DataError(f"Файл --{name} не найден: {path}")
+    # Copies work without symlink privileges on Windows and retain the exact input bytes/hashes.
+    with tempfile.TemporaryDirectory(prefix="money-graph-input-") as temporary:
+        source = Path(temporary)
+        for name, path in paths.items():
+            shutil.copyfile(path, source / f"{name}.parquet")
+        return analyze(source, args.rules)
+
+
+def main(argv: list[str] | None = None) -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Граф денег — воспроизводимый анализ")
     commands = parser.add_subparsers(dest="command", required=True)
     analyze_cmd = commands.add_parser("analyze")
-    analyze_cmd.add_argument("--data", type=Path, required=True)
+    source = analyze_cmd.add_mutually_exclusive_group(required=True)
+    source.add_argument("--data", type=Path, help="Папка nodes/edges/transactions.parquet")
+    source.add_argument(
+        "--nodes", type=Path, help="Путь к файлу узлов; вместе с --edges и --transactions"
+    )
+    analyze_cmd.add_argument("--edges", type=Path, help="Путь к файлу рёбер")
+    analyze_cmd.add_argument("--transactions", type=Path, help="Путь к файлу транзакций")
     analyze_cmd.add_argument("--out", type=Path, default=Path("artifacts"))
     analyze_cmd.add_argument("--rules", type=Path)
     demo_cmd = commands.add_parser("demo")
@@ -52,16 +86,19 @@ def main() -> None:
     serve_cmd.add_argument("--data", type=Path)
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=port_number, default=os.getenv("PORT", "3000"))
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.command == "analyze":
+        if args.data is not None and (args.edges is not None or args.transactions is not None):
+            parser.error("--data нельзя совмещать с --nodes, --edges или --transactions")
+        if args.nodes is not None and (args.edges is None or args.transactions is None):
+            parser.error("При --nodes также обязательны --edges и --transactions")
     try:
         if args.command == "demo":
             output_directory(args.out, demo=True)
             create_demo(args.out)
             print(f"Синтетический набор: {args.out}")
         elif args.command == "analyze":
-            sources = (args.data, args.rules) if args.rules is not None else (args.data,)
-            output_directory(args.out, sources)
-            result = analyze(args.data, args.rules)
+            result = analyze_inputs(args)
             write_result(result, args.out)
             print(json.dumps(result["report"], ensure_ascii=False, indent=2))
         else:

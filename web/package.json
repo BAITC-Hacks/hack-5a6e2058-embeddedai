@@ -1,13 +1,13 @@
 {
   "name": "money-graph-ui",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "check": "biome check src && tsc --noEmit",
-    "format": "biome check --write src",
+    "check": "biome check src public/theme-init.js && tsc --noEmit",
+    "format": "biome check --write src public/theme-init.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {

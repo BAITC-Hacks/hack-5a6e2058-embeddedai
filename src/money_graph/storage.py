@@ -39,7 +39,9 @@ def read_result(
     directory: Path, run_id: str, expected_rules: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     try:
-        result = json.loads((run_path(directory, run_id) / "result.json").read_text())
+        result = json.loads(
+            (run_path(directory, run_id) / "result.json").read_text(encoding="utf-8")
+        )
     except FileNotFoundError as exc:
         raise MissingRun from exc
     except (OSError, ValueError) as exc:
@@ -68,7 +70,7 @@ def read_result(
 
 def read_bootstrap(directory: Path) -> dict[str, Any] | None:
     try:
-        initial = json.loads((directory / "bootstrap.json").read_text())
+        initial = json.loads((directory / "bootstrap.json").read_text(encoding="utf-8"))
         if (
             not isinstance(initial, dict)
             or not isinstance(initial.get("run_id"), str)
@@ -86,7 +88,7 @@ def write_bootstrap(directory: Path, initial: dict[str, Any]) -> None:
     descriptor, name = tempfile.mkstemp(prefix=".bootstrap-", dir=directory)
     pending = Path(name)
     try:
-        with os.fdopen(descriptor, "w") as handle:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(initial, handle)
             handle.flush()
             os.fsync(handle.fileno())

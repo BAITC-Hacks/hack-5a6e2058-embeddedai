@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-uv sync --frozen
-uv run --frozen ruff check src tests
-uv run --frozen ruff format --check src tests
-uv run --frozen mypy src
-uv run --frozen pytest -q
-npm --prefix web ci --no-audit --no-fund
-npm --prefix web run check
-npm --prefix web run build
-uv run --frozen python scripts/smoke.py
-npm --prefix web exec -- playwright install chromium
-npm --prefix web run test:e2e
+exec uv run --frozen --python 3.12 python scripts/verify.py "$@"

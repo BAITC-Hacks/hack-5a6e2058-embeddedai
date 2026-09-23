@@ -42,7 +42,7 @@ def read_rules(path: Path | None = None) -> dict[str, Any]:
             source_path if source_path.is_file() else Path(__file__).parent / "resources/rules.json"
         )
     try:
-        cfg = json.loads(path.read_text())
+        cfg = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise DataError("Не удалось прочитать конфигурацию правил JSON") from exc
     integers = (
@@ -98,6 +98,15 @@ def read_rules(path: Path | None = None) -> dict[str, Any]:
     ):
         raise DataError("Некорректные пороги ролей")
     return cfg
+
+
+def input_fingerprints(data_dir: Path) -> dict[str, str]:
+    """Hash original bytes without allocating another copy of each Parquet file."""
+    digests = {}
+    for name in FILES:
+        with (data_dir / f"{name}.parquet").open("rb") as source:
+            digests[name] = hashlib.file_digest(source, "sha256").hexdigest()
+    return digests
 
 
 def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
@@ -177,10 +186,7 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
         "role_counts": {role: sum(row["role"] == role for row in records) for role in LABELS},
         "rules_version": rules["version"],
         "rules": rules,
-        "input_sha256": {
-            name: hashlib.sha256((data_dir / f"{name}.parquet").read_bytes()).hexdigest()
-            for name in FILES
-        },
+        "input_sha256": input_fingerprints(data_dir),
         "warnings": [
             "Наблюдаются только исходящие внутрибанковские переводы на 4 уровня",
             "Отсутствие перевода не доказывает отсутствие движения денег",
@@ -561,7 +567,11 @@ def write_result(result: dict[str, Any], out_dir: Path) -> None:
     try:
         columns = ["gid", "role", "role_score", "cluster_id", "priority_score", "evidence"]
         pd.DataFrame(result["nodes"])[columns].to_csv(
-            staging / EXPORTS[0], index=False, float_format="%.8f"
+            staging / EXPORTS[0],
+            index=False,
+            float_format="%.8f",
+            encoding="utf-8",
+            lineterminator="\n",
         )
         clusters = pd.DataFrame(result["clusters"])[
             ["cluster_id", "n_nodes", "n_seed", "sum_kzt_internal", "top_gids", "hypothesis"]
@@ -569,11 +579,14 @@ def write_result(result: dict[str, Any], out_dir: Path) -> None:
         clusters["top_gids"] = clusters.top_gids.map(
             lambda ids: json.dumps(ids, ensure_ascii=False)
         )
-        clusters.to_csv(staging / EXPORTS[1], index=False)
-        pd.DataFrame(result["top"]).to_csv(staging / EXPORTS[2], index=False)
+        clusters.to_csv(staging / EXPORTS[1], index=False, encoding="utf-8", lineterminator="\n")
+        pd.DataFrame(result["top"]).to_csv(
+            staging / EXPORTS[2], index=False, encoding="utf-8", lineterminator="\n"
+        )
         for name, payload in (("result.json", result), ("run_report.json", result["report"])):
             (staging / name).write_text(
-                json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+                json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
+                encoding="utf-8",
             )
         if backup.exists():
             raise DataError(f"Обнаружена резервная выгрузка {backup}; проверьте предыдущий запуск")

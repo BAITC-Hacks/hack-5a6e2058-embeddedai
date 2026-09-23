@@ -17,14 +17,22 @@ def summarize(
         pair = (mapping[str(edge["src"])], mapping[str(edge["dst"])])
         flows[pair] += edge["sum_kzt"]
         counts[pair] += 1
+    incoming_by_cluster: dict[int, float] = defaultdict(float)
+    outgoing_by_cluster: dict[int, float] = defaultdict(float)
+    # Preserve the order of grouped floating-point additions, but visit each
+    # inter-community pair once instead of scanning all pairs for every cluster.
+    for (src, dst), amount in flows.items():
+        if src != dst:
+            incoming_by_cluster[dst] += amount
+            outgoing_by_cluster[src] += amount
     summaries = []
     for cid, group in sorted(members.items()):
         roles = Counter(row["role"] for row in group)
         seeds = sum(row["is_seed"] for row in group)
         boundary = sum(row["boundary_censored"] for row in group)
         internal = flows[(cid, cid)]
-        incoming = sum(value for (src, dst), value in flows.items() if src != cid and dst == cid)
-        outgoing = sum(value for (src, dst), value in flows.items() if src == cid and dst != cid)
+        incoming = incoming_by_cluster[cid]
+        outgoing = outgoing_by_cluster[cid]
         total = internal + incoming + outgoing
         if len(group) == 1 and group[0]["isolated"]:
             hypothesis = "Изолированный узел: связи и назначение не установлены в данной выгрузке."

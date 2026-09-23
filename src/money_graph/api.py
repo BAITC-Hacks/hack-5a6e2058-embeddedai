@@ -1,6 +1,5 @@
 """Local-first API. Unpredictable run IDs are capability links for uploaded runs."""
 
-import hashlib
 import json
 import os
 import secrets
@@ -16,15 +15,15 @@ from fastapi.staticfiles import StaticFiles
 from . import storage as store
 from .demo import create_demo
 from .investigation import node_evidence, resilience
-from .loader import FILES, DataError
-from .pipeline import EXPORTS, ROOT, analyze, read_rules, write_result
+from .loader import DataError
+from .pipeline import EXPORTS, ROOT, analyze, input_fingerprints, read_rules, write_result
 from .roles import LABELS
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 
 
 def create_app(initial_data: Path | None = None, storage: Path | None = None) -> FastAPI:
-    app = FastAPI(title="Граф денег", version="0.3.0")
+    app = FastAPI(title="Граф денег", version="0.4.0")
     directory = (storage or Path(os.getenv("MONEY_GRAPH_STORAGE", ROOT / "var/runs"))).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     gate = threading.Lock()
@@ -34,7 +33,7 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
         # A running process uses one configuration for both new and restored runs.
         with tempfile.TemporaryDirectory(prefix=".rules-", dir=directory) as temp:
             snapshot = Path(temp) / "rules.json"
-            snapshot.write_text(json.dumps(rules, ensure_ascii=False))
+            snapshot.write_text(json.dumps(rules, ensure_ascii=False), encoding="utf-8")
             result = analyze(source, snapshot)
         result["report"]["synthetic"] = synthetic
         return result
@@ -51,12 +50,7 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
                 and saved["report"].get("synthetic") == demo
             )
             if current and initial_data is not None:
-                digests = {
-                    name: hashlib.sha256(
-                        (initial_data / f"{name}.parquet").read_bytes()
-                    ).hexdigest()
-                    for name in FILES
-                }
+                digests = input_fingerprints(initial_data)
                 current = saved["report"].get("input_sha256") == digests
         except (store.MissingRun, store.CorruptRun, store.ObsoleteRun, OSError):
             current = False
@@ -105,7 +99,7 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": "0.3.0"}
+        return {"status": "ok", "version": "0.4.0"}
 
     @app.get("/api/bootstrap")
     def initial_run() -> dict[str, Any]:

@@ -1,6 +1,6 @@
 [project]
 name = "money-graph"
-version = "0.3.0"
+version = "0.4.0"
 description = "Explainable transaction network analysis for HackAlem"
 requires-python = ">=3.12,<3.13"
 dependencies = [

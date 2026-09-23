@@ -1,6 +1,6 @@
 """Directed flow metrics; an undirected projection is used only for communities."""
 
-from typing import Any, cast
+from typing import Any
 
 import networkx as nx
 import pandas as pd
@@ -18,10 +18,10 @@ def percentile(values: pd.Series, eligible: pd.Series | None = None) -> pd.Serie
 def build_graph(nodes: pd.DataFrame, edges: pd.DataFrame) -> nx.DiGraph:
     graph: nx.DiGraph = nx.DiGraph()
     graph.add_nodes_from(int(gid) for gid in nodes.gid)
-    for row in cast(list[dict[str, Any]], edges.to_dict("records")):
-        graph.add_edge(
-            int(row["src"]), int(row["dst"]), sum_kzt=float(row["sum_kzt"]), n_tx=int(row["n_tx"])
-        )
+    for src, dst, amount, count in edges[["src", "dst", "sum_kzt", "n_tx"]].itertuples(
+        index=False, name=None
+    ):
+        graph.add_edge(int(src), int(dst), sum_kzt=float(amount), n_tx=int(count))
     return graph
 
 
@@ -39,32 +39,38 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
     frame = nodes.copy().set_index("gid")
     # A transfer to the same client is observed turnover, but not movement
     # between counterparties and cannot support a transit or intermediary role.
-    external = graph.copy()
-    external.remove_edges_from(nx.selfloop_edges(graph))
-    self_flows = {gid: graph.get_edge_data(gid, gid, {}) for gid in graph}
+    self_flows = {gid: attrs for gid, _, attrs in nx.selfloop_edges(graph, data=True)}
+    external = graph
+    if self_flows:
+        external = graph.copy()
+        external.remove_edges_from((gid, gid) for gid in self_flows)
     frame["self_transfer_kzt"] = pd.Series(
-        {gid: attrs.get("sum_kzt", 0.0) for gid, attrs in self_flows.items()}
-    )
+        {gid: attrs["sum_kzt"] for gid, attrs in self_flows.items()}, dtype="float64"
+    ).reindex(frame.index, fill_value=0.0)
     frame["self_transfer_tx"] = pd.Series(
-        {gid: attrs.get("n_tx", 0) for gid, attrs in self_flows.items()}
-    )
+        {gid: attrs["n_tx"] for gid, attrs in self_flows.items()}, dtype="int64"
+    ).reindex(frame.index, fill_value=0)
     exact = len(external) <= rules["betweenness_exact_max_nodes"]
-    for column, values in {
-        "in_deg": dict(external.in_degree()),
-        "out_deg": dict(external.out_degree()),
-        "in_kzt": dict(external.in_degree(weight="sum_kzt")),
-        "out_kzt": dict(external.out_degree(weight="sum_kzt")),
-        "in_tx": dict(external.in_degree(weight="n_tx")),
-        "out_tx": dict(external.out_degree(weight="n_tx")),
-        "pagerank": nx.pagerank(external, weight="sum_kzt", max_iter=500),
-        "betweenness": nx.betweenness_centrality(
+    # Degree views are cheap; materialize one metric at a time instead of
+    # retaining all metric dictionaries alongside the graph and dataframe.
+    for column, degree in (
+        ("in_deg", external.in_degree()),
+        ("out_deg", external.out_degree()),
+        ("in_kzt", external.in_degree(weight="sum_kzt")),
+        ("out_kzt", external.out_degree(weight="sum_kzt")),
+        ("in_tx", external.in_degree(weight="n_tx")),
+        ("out_tx", external.out_degree(weight="n_tx")),
+    ):
+        frame[column] = pd.Series(dict(degree))
+    frame["pagerank"] = pd.Series(nx.pagerank(external, weight="sum_kzt", max_iter=500))
+    frame["betweenness"] = pd.Series(
+        nx.betweenness_centrality(
             external,
             k=None if exact else min(rules["betweenness_samples"], len(external)),
             seed=rules["random_seed"],
             weight=None,
-        ),
-    }.items():
-        frame[column] = pd.Series(values)
+        )
+    )
     reach = dict.fromkeys(graph, 0)
     for seed in nodes.loc[nodes.is_seed, "gid"]:
         for gid in nx.single_source_shortest_path_length(
@@ -102,8 +108,11 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
 
 def communities(graph: nx.DiGraph, rules: dict[str, Any]) -> dict[int, int]:
     undirected = projection(graph)
-    isolates = list(nx.isolates(undirected))
-    connected = undirected.subgraph([gid for gid in undirected if undirected.degree(gid) > 0])
+    isolates: list[int] = []
+    active: list[int] = []
+    for gid, degree in undirected.degree():
+        (active if degree else isolates).append(gid)
+    connected = undirected.subgraph(active) if isolates else undirected
     groups = (
         list(
             nx.community.louvain_communities(

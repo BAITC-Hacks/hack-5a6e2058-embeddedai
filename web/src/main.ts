@@ -1,6 +1,7 @@
 import cytoscape, { type Core } from "cytoscape";
 import "./style.css";
 import { downloadDossier, openInvestigation, renderAnalysis, timeline } from "./analysis";
+import { graphPalette, initializeTheme } from "./theme";
 import type {
   Cluster,
   CommunityGraph,
@@ -35,7 +36,7 @@ let currentGid = "";
 
 $("app").innerHTML = `
   <header class="header"><a class="brand" href="/" aria-label="На главную"><span class="brand-icon">◈</span><span>Граф денег<small>EMBEDDEDAI / FINANCIAL INTELLIGENCE</small></span></a>
-    <div class="header-right"><span id="dataset-badge" class="tag">Подключение…</span><button id="upload-open" class="button primary">＋ Загрузить данные</button></div></header>
+    <div class="header-right"><div class="theme-control"><label for="theme-select">Тема</label><select id="theme-select" aria-label="Цветовая тема"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div><span id="dataset-badge" class="tag">Подключение…</span><button id="upload-open" class="button primary">＋ Загрузить данные</button></div></header>
   <main><div class="heading"><div><p class="eyebrow">АНАЛИТИКА ТРАНЗАКЦИОННОЙ СЕТИ</p><h1>Увидеть связи. Объяснить приоритет.</h1><p class="subtitle">От потока переводов — к обоснованной гипотезе для проверки.</p></div><div class="export-wrap"><label for="export-select">Выгрузить результат</label><select id="export-select"><option value="">Выберите CSV ↓</option><option value="nodes_roles.csv">Все узлы и роли</option><option value="clusters.csv">Кластеры</option><option value="top_nodes.csv">Топ приоритетов</option></select></div></div>
   <div id="alert" class="alert" role="status" hidden></div>
   <section id="metrics" class="metrics" aria-label="Показатели набора"><div class="metric">Загрузка показателей…</div></section>
@@ -67,6 +68,15 @@ $("app").innerHTML = `
   <dialog id="investigation-dialog" class="wide-dialog" aria-labelledby="investigation-title"><div class="dialog-title"><h2 id="investigation-title">Доказательная карточка</h2><button id="investigation-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="investigation-content"></div></dialog>`;
 
 const emptyDetail = $("detail").innerHTML;
+initializeTheme($<HTMLSelectElement>("theme-select"), () => {
+  cy?.style(graphStyles(communityMode));
+});
+new ResizeObserver(() => {
+  if (cy && $("graph").clientWidth > 0 && $("graph").clientHeight > 0) {
+    cy.resize();
+    cy.fit(undefined, 35);
+  }
+}).observe($("graph"));
 
 function alert(message: string) {
   $("alert").textContent = message;
@@ -203,6 +213,64 @@ function graphFailed(error: unknown) {
   showError(error);
 }
 
+function graphStyles(communities: boolean): cytoscape.StylesheetStyle[] {
+  const palette = graphPalette();
+  return [
+    {
+      selector: "node",
+      style: {
+        "background-color": "data(color)",
+        width: "data(size)",
+        height: "data(size)",
+        "border-width": 2,
+        "border-color": palette.border,
+        "font-size": 10,
+        "text-valign": "bottom",
+        "text-margin-y": 7,
+        "text-outline-width": 2,
+        "text-outline-color": palette.background,
+        color: palette.text,
+        label: communities ? "data(label)" : "",
+      },
+    },
+    { selector: "node[?is_seed]", style: { shape: "diamond", "border-color": palette.seed } },
+    {
+      selector: "node[?boundary_censored]",
+      style: { "border-style": "dashed", "border-color": palette.boundary },
+    },
+    {
+      selector: "edge",
+      style: {
+        width: 1.3,
+        "line-color": palette.edge,
+        "target-arrow-color": palette.arrow,
+        "target-arrow-shape": "triangle",
+        "curve-style": "bezier",
+        opacity: 0.75,
+        "arrow-scale": 0.8,
+      },
+    },
+    {
+      selector: "node:selected",
+      style: {
+        label: "data(label)",
+        "border-color": palette.selected,
+        "border-width": 4,
+        "z-index": 100,
+      },
+    },
+    {
+      selector: "edge:selected",
+      style: {
+        "line-color": palette.accent,
+        "target-arrow-color": palette.accent,
+        width: 3,
+        opacity: 1,
+      },
+    },
+  ];
+}
+
 async function loadGraph(gid?: string, full = false) {
   const sequence = ++graphSequence;
   communityMode = false;
@@ -253,52 +321,7 @@ async function loadGraph(gid?: string, full = false) {
     minZoom: 0.08,
     maxZoom: 4,
     wheelSensitivity: 0.25,
-    style: [
-      {
-        selector: "node",
-        style: {
-          "background-color": "data(color)",
-          width: "data(size)",
-          height: "data(size)",
-          "border-width": 2,
-          "border-color": "#ffffff",
-          "font-size": 10,
-          "text-valign": "bottom",
-          "text-margin-y": 7,
-          color: "#22394d",
-        },
-      },
-      { selector: "node[?is_seed]", style: { shape: "diamond", "border-color": "#19364b" } },
-      {
-        selector: "node[?boundary_censored]",
-        style: { "border-style": "dashed", "border-color": "#687f91" },
-      },
-      {
-        selector: "edge",
-        style: {
-          width: 1.3,
-          "line-color": "#b9cbd6",
-          "target-arrow-color": "#a4b9c7",
-          "target-arrow-shape": "triangle",
-          "curve-style": "bezier",
-          opacity: 0.55,
-          "arrow-scale": 0.7,
-        },
-      },
-      {
-        selector: "node:selected",
-        style: {
-          label: "data(label)",
-          "border-color": "#102f45",
-          "border-width": 4,
-          "z-index": 100,
-        },
-      },
-      {
-        selector: "edge:selected",
-        style: { "line-color": "#087f76", "target-arrow-color": "#087f76", width: 3 },
-      },
-    ],
+    style: graphStyles(false),
     layout: {
       name: result.shown > 500 ? "grid" : "cose",
       animate: false,
@@ -431,7 +454,13 @@ $("graph-png").onclick = () => {
   if (cy) {
     const a = document.createElement("a");
     a.download = "money-graph.png";
-    a.href = cy.png({ full: true, scale: 2, bg: "#ffffff", maxWidth: 4000, maxHeight: 4000 });
+    a.href = cy.png({
+      full: true,
+      scale: 2,
+      bg: graphPalette().background,
+      maxWidth: 4000,
+      maxHeight: 4000,
+    });
     a.click();
   }
 };
@@ -577,31 +606,7 @@ async function showCommunityMap() {
         data: { id: `ce${i}`, source: `c${e.src}`, target: `c${e.dst}`, ...e },
       })),
     ],
-    style: [
-      {
-        selector: "node",
-        style: {
-          width: "data(size)",
-          height: "data(size)",
-          "background-color": "data(color)",
-          label: "data(label)",
-          "font-size": 10,
-          color: "#20384d",
-          "text-valign": "bottom",
-          "text-margin-y": 5,
-        },
-      },
-      {
-        selector: "edge",
-        style: {
-          "target-arrow-shape": "triangle",
-          "curve-style": "bezier",
-          "line-color": "#a4b9c7",
-          "target-arrow-color": "#a4b9c7",
-          opacity: 0.6,
-        },
-      },
-    ],
+    style: graphStyles(true),
     layout: { name: "cose", animate: false, randomize: false, padding: 35 },
   });
   cy.on("tap", "node", (event) => {

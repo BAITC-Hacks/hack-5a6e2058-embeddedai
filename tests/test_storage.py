@@ -148,7 +148,7 @@ def test_valid_json_with_corrupt_nodes_is_not_reused(tmp_path):
     client = TestClient(api.create_app(storage=tmp_path))
     run = client.get("/api/bootstrap").json()["run_id"]
     path = tmp_path / run / "result.json"
-    payload = json.loads(path.read_text())
+    payload = json.loads(path.read_text(encoding="utf-8"))
     payload["nodes"] = [None]
     path.write_text(json.dumps(payload))
     assert client.get(f"/api/runs/{run}").status_code == 503

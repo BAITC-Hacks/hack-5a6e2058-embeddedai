@@ -1,0 +1,52 @@
+name: Verify submission
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "README.md", "artifacts/run_report.json"]
+  pull_request:
+    paths-ignore: ["docs/**", "README.md", "artifacts/run_report.json"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Python 3.12 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.6"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: runner.os == 'Linux'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install Chromium and Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix web exec -- playwright install --with-deps chromium
+      - name: Full verification including browser
+        if: runner.os == 'Linux'
+        run: uv run --frozen python scripts/verify.py
+      - name: Backend verification without Node or Bash
+        if: runner.os != 'Linux'
+        run: uv run --frozen python scripts/verify.py --backend-only
+      - name: Analyze the three input files
+        run: uv run --frozen --no-dev python analyze.py --nodes data/data/nodes.parquet --edges data/data/edges.parquet --transactions data/data/transactions.parquet --out artifacts
+      - name: Confirm the committed CSV results reproduce
+        run: git diff --exit-code -- artifacts/nodes_roles.csv artifacts/clusters.csv artifacts/top_nodes.csv

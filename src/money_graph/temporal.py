@@ -1,6 +1,7 @@
 """Date-resolution evidence: no inferred intraday order or provenance of funds."""
 
 from collections import deque
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -8,24 +9,33 @@ import pandas as pd
 
 def summarize(transactions: pd.DataFrame, gids: list[int]) -> dict[int, dict[str, Any]]:
     days: dict[int, dict[str, dict[str, Any]]] = {gid: {} for gid in gids}
-    for tx in transactions.to_dict("records"):
-        if tx["src"] == tx["dst"]:
+    dates: dict[date, str] = {}
+    ordinals: dict[str, int] = {}
+    for src, dst, when, amount in transactions[["src", "dst", "date", "sum_kzt"]].itertuples(
+        index=False, name=None
+    ):
+        if src == dst:
             continue
-        date = tx["date"].date().isoformat()
-        for gid, direction, other in ((tx["dst"], "in", tx["src"]), (tx["src"], "out", tx["dst"])):
-            day = days[gid].setdefault(
-                date,
-                {
-                    "date": date,
+        calendar_date = when.date()
+        date_key = dates.get(calendar_date)
+        if date_key is None:
+            date_key = calendar_date.isoformat()
+            dates[calendar_date] = date_key
+            ordinals[date_key] = calendar_date.toordinal()
+        for gid, direction, other in ((dst, "in", src), (src, "out", dst)):
+            day = days[gid].get(date_key)
+            if day is None:
+                day = {
+                    "date": date_key,
                     "in_kzt": 0.0,
                     "out_kzt": 0.0,
                     "in_tx": 0,
                     "out_tx": 0,
                     "senders": set(),
                     "receivers": set(),
-                },
-            )
-            day[f"{direction}_kzt"] += float(tx["sum_kzt"])
+                }
+                days[gid][date_key] = day
+            day[f"{direction}_kzt"] += float(amount)
             day[f"{direction}_tx"] += 1
             day["senders" if direction == "in" else "receivers"].add(other)
     result = {}
@@ -34,7 +44,7 @@ def summarize(transactions: pd.DataFrame, gids: list[int]) -> dict[int, dict[str
         available: deque[list[int]] = deque()
         matched_cents = 0
         for day in daily:
-            ordinal = pd.Timestamp(day["date"]).date().toordinal()
+            ordinal = ordinals[day["date"]]
             while available and ordinal - available[0][0] > 2:
                 available.popleft()
             outgoing = round(day["out_kzt"] * 100)
