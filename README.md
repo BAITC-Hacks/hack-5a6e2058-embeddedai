@@ -173,7 +173,7 @@ Bash-обёртки `scripts/start.sh` и `scripts/verify.sh` сохранены
 
 ![Синтетический пример: направленный граф и объяснение роли узла](docs/images/demo.png)
 
-[Посмотреть тёмную тему](docs/images/demo-dark.png).
+[Посмотреть тёмную тему](docs/images/demo-dark.png) · [Пример AI-ответа](docs/images/assistant.png).
 
 Основной сценарий: загрузите три файла → откройте TOP → объясните роль через
 факты → найдите произвольный `gid` → покажите связи/сообщество → скачайте CSV.
@@ -211,7 +211,7 @@ flowchart LR
 Python 3.12, pandas, PyArrow, NumPy/SciPy, NetworkX, FastAPI, Uvicorn;
 TypeScript, Cytoscape.js и Vite. CLI и API вызывают один `pipeline.analyze`.
 Состояние хранится в каталогах запусков; база данных для данного объёма не нужна.
-Вычисления выполняются на CPU. GPU, обучение нейросети и платные API не требуются.
+Основной аналитический пайплайн выполняется на CPU. GPU, обучение нейросети и платные API для него не требуются.
 
 `uv build --wheel` собирает самостоятельный Python-пакет для команд `demo` и
 `analyze`. Правила включены в wheel: после установки расчёт работает вне checkout

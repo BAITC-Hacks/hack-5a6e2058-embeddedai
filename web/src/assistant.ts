@@ -199,6 +199,8 @@ export class AnalystAssistant {
       if (sequence === this.sequence) {
         this.pending = false;
         this.updateControls();
+        if (!$("assistant-view").hidden)
+          $("assistant-result").scrollIntoView({ block: "start", behavior: "auto" });
       }
     }
   }

@@ -84,6 +84,7 @@ test("AI uses selected string gids and session-only access code, escapes output 
   await page.locator("#assistant-token").fill("test-access-code");
   await page.locator("#assistant-send").click();
   await expect(page.locator(".assistant-answer-text")).toContainText("<img src=x");
+  await expect(page.locator(".assistant-answer-text")).toBeInViewport();
   await expect(page.locator("#assistant-result img")).toHaveCount(0);
   expect(payload).toEqual({ question: "Кто собирает деньги с этих двоих?", selected_gids: chosen });
   expect(sentToken).toBe("test-access-code");
@@ -126,6 +127,7 @@ test("AI cancellation ignores a late response and API failure stays an actionabl
   await expect(page.locator("#assistant-result")).toContainText("Запрос отменён");
   await page.locator("#assistant-send").click();
   await expect(page.locator("#assistant-result")).toContainText("Провайдер временно недоступен");
+  await expect(page.locator("#assistant-result .alert")).toBeInViewport();
   await expect(page.locator(".assistant-answer")).toHaveCount(0);
   await expect(page.locator("#assistant-send")).toBeEnabled();
 });
