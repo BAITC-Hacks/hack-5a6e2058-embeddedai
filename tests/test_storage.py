@@ -130,3 +130,50 @@ def test_export_does_not_require_result_json_for_recovery(tmp_path):
     assert client.get(f"/api/runs/{run}").status_code == 404
     assert client.get(f"/api/runs/{run}/exports/nodes_roles.csv").status_code == 200
     assert client.get("/api/runs/not-a-run/exports/nodes_roles.csv").status_code == 404
+
+
+def test_synthetic_provenance_belongs_to_run_not_current_bootstrap(tmp_path):
+    source, storage = tmp_path / "input", tmp_path / "runs"
+    create_demo(source)
+    demo = TestClient(api.create_app(storage=storage)).get("/api/bootstrap").json()["run_id"]
+    explicit = TestClient(api.create_app(initial_data=source, storage=storage))
+    assert explicit.get(f"/api/runs/{demo}").json()["synthetic"] is True
+    selected = explicit.get("/api/bootstrap").json()["run_id"]
+    assert explicit.get(f"/api/runs/{selected}").json()["synthetic"] is False
+
+
+def test_valid_json_with_corrupt_nodes_is_not_reused(tmp_path):
+    import json
+
+    client = TestClient(api.create_app(storage=tmp_path))
+    run = client.get("/api/bootstrap").json()["run_id"]
+    path = tmp_path / run / "result.json"
+    payload = json.loads(path.read_text())
+    payload["nodes"] = [None]
+    path.write_text(json.dumps(payload))
+    assert client.get(f"/api/runs/{run}").status_code == 503
+    assert client.get(f"/api/runs/{run}/graph").status_code == 503
+    assert client.get(f"/api/runs/{run}/exports/nodes_roles.csv").status_code == 200
+    restarted = TestClient(api.create_app(storage=tmp_path))
+    assert restarted.get("/api/bootstrap").json()["run_id"] != run
+
+
+def test_process_configuration_is_frozen_for_uploads(tmp_path, monkeypatch):
+    source, storage = tmp_path / "input", tmp_path / "runs"
+    create_demo(source)
+    client = TestClient(api.create_app(storage=storage))
+    old = client.get("/api/bootstrap").json()["run_id"]
+    baseline = client.get(f"/api/runs/{old}").json()["rules"]
+    changed = api.read_rules() | {"random_seed": baseline["random_seed"] + 1}
+    original = api.read_rules
+
+    def read_modified_default(path=None):
+        return changed if path is None else original(path)
+
+    monkeypatch.setattr("money_graph.pipeline.read_rules", read_modified_default)
+    response = client.post("/api/analyze", files=files_at(source))
+    assert response.status_code == 200
+    run = response.json()["run_id"]
+    saved = client.get(f"/api/runs/{run}")
+    assert saved.status_code == 200
+    assert saved.json()["rules"] == baseline

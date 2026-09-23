@@ -143,7 +143,9 @@ def test_failed_validation_keeps_previous_generation(dataset, tmp_path):
 def test_official_contract_if_present():
     source = Path("data/data")
     if not source.is_dir():
-        pytest.skip("Official organizer archive is not distributed with the source code")
+        pytest.skip(
+            "Official dataset is absent in this checkout; synthetic contract tests still run"
+        )
     result = analyze(source)
     report = result["report"]
     assert report["n_nodes"] == 2248

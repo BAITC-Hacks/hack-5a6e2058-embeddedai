@@ -10,6 +10,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .loader import DataError
+from .pipeline import validate_result
+
 LOGGER = logging.getLogger(__name__)
 RUN_ID = re.compile(r"[a-f0-9]{32}")
 
@@ -22,13 +25,19 @@ class CorruptRun(Exception):
     pass
 
 
+class ObsoleteRun(Exception):
+    pass
+
+
 def run_path(directory: Path, run_id: str) -> Path:
     if not RUN_ID.fullmatch(run_id):
         raise MissingRun
     return directory / run_id
 
 
-def read_result(directory: Path, run_id: str) -> dict[str, Any]:
+def read_result(
+    directory: Path, run_id: str, expected_rules: dict[str, Any] | None = None
+) -> dict[str, Any]:
     try:
         result = json.loads((run_path(directory, run_id) / "result.json").read_text())
     except FileNotFoundError as exc:
@@ -45,6 +54,15 @@ def read_result(directory: Path, run_id: str) -> dict[str, Any]:
         )
     ):
         raise CorruptRun
+    if expected_rules is not None and (
+        result["report"].get("rules") != expected_rules
+        or result["report"].get("rules_version") != expected_rules["version"]
+    ):
+        raise ObsoleteRun
+    try:
+        validate_result(result)
+    except (DataError, KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise CorruptRun from exc
     return result
 
 

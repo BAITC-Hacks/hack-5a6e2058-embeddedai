@@ -165,3 +165,25 @@ test("investigation is discoverable and displayed role support matches its trace
   await expect(page.locator("#method-content")).toContainText("точный расчёт");
   await expect(page.locator("#method-dialog")).toHaveAccessibleName("Объяснимый расчёт");
 });
+
+test("PNG export waits for the requested graph to finish loading", async ({ page }) => {
+  const gate = deferred();
+  const requested = deferred();
+  await page.route("**/community-graph", async (route) => {
+    requested.resolve();
+    await gate.promise;
+    await route.continue();
+  });
+  await page.locator("#community-map").click();
+  await requested.promise;
+  await expect(page.locator("#graph-count")).toHaveText("Загрузка сообществ…");
+  await expect(page.locator("#graph-png")).toBeDisabled();
+  gate.resolve();
+  await expect(page.locator("#graph-count")).toContainText(/^\d+ сообществ/);
+  await expect(page.locator("#graph-png")).toBeEnabled();
+  const pending = page.waitForEvent("download");
+  await page.locator("#graph-png").click();
+  const download = await pending;
+  expect(download.suggestedFilename()).toBe("money-graph.png");
+  expect(await download.failure()).toBeNull();
+});

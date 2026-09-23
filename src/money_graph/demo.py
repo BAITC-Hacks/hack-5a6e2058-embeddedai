@@ -41,9 +41,9 @@ def create_demo(directory: Path) -> None:
     for index in range(8, 80):
         if base + index not in reached:
             transfer(40, index, 5000, 5)
-    graph = nx.DiGraph()
+    graph: nx.DiGraph = nx.DiGraph()
     graph.add_edges_from((r["src"], r["dst"]) for r in tx)
-    distances = {}
+    distances: dict[int, int] = {}
     for seed in range(7):
         for gid, distance in nx.single_source_shortest_path_length(graph, base + seed).items():
             distances[gid] = min(distances.get(gid, distance), distance)

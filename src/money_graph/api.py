@@ -1,6 +1,7 @@
 """Local-first API. Unpredictable run IDs are capability links for uploaded runs."""
 
 import hashlib
+import json
 import os
 import secrets
 import tempfile
@@ -28,13 +29,27 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
     directory.mkdir(parents=True, exist_ok=True)
     gate = threading.Lock()
     rules = read_rules()
+
+    def calculate(source: Path, synthetic: bool) -> dict[str, Any]:
+        # A running process uses one configuration for both new and restored runs.
+        with tempfile.TemporaryDirectory(prefix=".rules-", dir=directory) as temp:
+            snapshot = Path(temp) / "rules.json"
+            snapshot.write_text(json.dumps(rules, ensure_ascii=False))
+            result = analyze(source, snapshot)
+        result["report"]["synthetic"] = synthetic
+        return result
+
     initial = store.read_bootstrap(directory)
     current = False
     demo = initial_data is None
     if initial and initial["synthetic"] == demo:
         try:
-            saved = store.read_result(directory, initial["run_id"])
-            current = saved["report"].get("rules") == rules
+            saved = store.read_result(directory, initial["run_id"], expected_rules=rules)
+            current = (
+                saved["report"].get("rules") == rules
+                and saved["report"].get("rules_version") == rules["version"]
+                and saved["report"].get("synthetic") == demo
+            )
             if current and initial_data is not None:
                 digests = {
                     name: hashlib.sha256(
@@ -43,15 +58,16 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
                     for name in FILES
                 }
                 current = saved["report"].get("input_sha256") == digests
-        except (store.MissingRun, store.CorruptRun, OSError):
+        except (store.MissingRun, store.CorruptRun, store.ObsoleteRun, OSError):
             current = False
     if not current:
         if demo:
             with tempfile.TemporaryDirectory() as temp:
                 create_demo(Path(temp))
-                result = analyze(Path(temp))
+                result = calculate(Path(temp), synthetic=True)
         else:
-            result = analyze(initial_data)  # type: ignore[arg-type]
+            assert initial_data is not None
+            result = calculate(initial_data, synthetic=False)
         run_id = secrets.token_hex(16)
         write_result(result, directory / run_id)
         initial = {"run_id": run_id, "synthetic": demo}
@@ -61,21 +77,21 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
 
     def result_for(run_id: str) -> dict[str, Any]:
         try:
-            result = store.read_result(directory, run_id)
+            result = store.read_result(directory, run_id, expected_rules=rules)
         except store.MissingRun as exc:
             raise HTTPException(
                 404, "Расчёт не найден или срок хранения истёк; загрузите данные повторно"
+            ) from exc
+        except store.ObsoleteRun as exc:
+            raise HTTPException(
+                409,
+                "Конфигурация анализа обновлена. Загрузите файлы повторно; прежние CSV доступны по сохранённым ссылкам выгрузки",
             ) from exc
         except store.CorruptRun as exc:
             raise HTTPException(
                 503,
                 "Сохранённый расчёт повреждён. Скачайте доступные CSV или загрузите файлы повторно",
             ) from exc
-        if result["report"].get("rules") != rules:
-            raise HTTPException(
-                409,
-                "Конфигурация анализа обновлена. Загрузите файлы повторно; прежние CSV доступны по сохранённым ссылкам выгрузки",
-            )
         return result
 
     @app.middleware("http")
@@ -115,7 +131,7 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
                     if len(data) > MAX_FILE_BYTES:
                         raise HTTPException(413, f"{name}: файл больше 10 МБ")
                     (source / f"{name}.parquet").write_bytes(data)
-                result = analyze(source)
+                result = calculate(source, synthetic=False)
             run_id = secrets.token_hex(16)
             write_result(result, directory / run_id)
             store.prune(directory, bootstrap["run_id"], run_id)
@@ -129,10 +145,7 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
 
     @app.get("/api/runs/{run_id}")
     def report(run_id: str) -> dict[str, Any]:
-        return {
-            **result_for(run_id)["report"],
-            "synthetic": bootstrap["synthetic"] if run_id == bootstrap["run_id"] else False,
-        }
+        return result_for(run_id)["report"]
 
     @app.get("/api/runs/{run_id}/top")
     def top(run_id: str) -> list[dict[str, Any]]:

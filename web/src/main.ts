@@ -53,8 +53,8 @@ $("app").innerHTML = `
       <button id="reset" class="text-button">Сбросить фильтры</button>
       <div class="panel-heading list-heading"><h2>Приоритет проверки</h2><span class="tag small">TOP 50</span></div><div id="top-list" class="top-list"></div>
     </aside>
-    <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button></div><div><button id="fit" class="icon-button" title="Вместить граф">⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
-      <div class="graph-options"><button id="community-map" class="text-button">Обзор сообществ</button><label for="color-mode">Цвет</label><select id="color-mode"><option value="role">По роли</option><option value="cluster">По сообществу</option></select><button id="graph-png" class="text-button">PNG ↓</button></div><div id="edge-info" class="edge-info" hidden></div><div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count" role="status">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
+    <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button></div><div><button id="fit" class="icon-button" title="Вместить граф" disabled>⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
+      <div class="graph-options"><button id="community-map" class="text-button">Обзор сообществ</button><label for="color-mode">Цвет</label><select id="color-mode"><option value="role">По роли</option><option value="cluster">По сообществу</option></select><button id="graph-png" class="text-button" disabled>PNG ↓</button></div><div id="edge-info" class="edge-info" hidden></div><div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count" role="status">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
       <div id="clusters-view" hidden></div><div id="analysis-view" hidden></div>
       <div id="graph-legend" class="legend">${Object.entries(labels)
         .map(([key, label]) => `<span><i style="background:${colors[key]}"></i>${label}</span>`)
@@ -178,7 +178,13 @@ function resetOtherFilters(keep = "") {
   clearFilterControls(keep);
 }
 
+function setGraphActionsEnabled(enabled: boolean) {
+  $<HTMLButtonElement>("graph-png").disabled = !enabled;
+  $<HTMLButtonElement>("fit").disabled = !enabled;
+}
+
 function graphLoading(message: string) {
+  setGraphActionsEnabled(false);
   alert("");
   $("graph").setAttribute("aria-busy", "true");
   $("graph-count").textContent = message;
@@ -311,6 +317,7 @@ async function loadGraph(gid?: string, full = false) {
     void selectNode(String(event.target.id()), false).catch(showError);
   });
   if (currentGid) cy.getElementById(currentGid).select();
+  setGraphActionsEnabled(result.shown > 0);
 }
 
 function links(rows: Edge[], incoming: boolean) {
@@ -608,6 +615,7 @@ async function showCommunityMap() {
       `Сообщество #${e.src} → #${e.dst}: ${money(e.sum_kzt)} · ${e.n_edges} связей`;
     $("edge-info").hidden = false;
   });
+  setGraphActionsEnabled(result.nodes.length > 0);
 }
 
 function updateLegend() {

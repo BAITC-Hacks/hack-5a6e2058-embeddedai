@@ -7,6 +7,8 @@ import os
 import shutil
 import tempfile
 import time
+from collections import Counter, defaultdict
+from datetime import date
 from pathlib import Path
 from typing import Any, cast
 
@@ -217,21 +219,337 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
 
 
 def validate_result(result: dict[str, Any]) -> None:
+    """Check stored data before the API/UI consumes it; do not rerun the analysis."""
+    try:
+        _validate_result(result)
+    except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
+        if isinstance(exc, DataError):
+            raise
+        raise DataError("Повреждена структура сохранённого результата") from exc
+
+
+def _validate_result(result: dict[str, Any]) -> None:
+    def require(condition: bool, field: str) -> None:
+        if not condition:
+            raise DataError(f"Некорректный сохранённый результат: {field}")
+
+    def number(value: Any, minimum: float = 0, maximum: float = math.inf) -> bool:
+        return type(value) in (int, float) and math.isfinite(value) and minimum <= value <= maximum
+
+    def integer(value: Any, minimum: int = 0) -> bool:
+        return type(value) is int and value >= minimum
+
+    def identifier(value: Any) -> bool:
+        return (
+            isinstance(value, str)
+            and value.isascii()
+            and value.removeprefix("-").isdecimal()
+            and len(value) <= 20
+            and str(int(value)) == value
+            and -(2**63) <= int(value) <= 2**63 - 1
+        )
+
+    def text(value: Any) -> bool:
+        return isinstance(value, str) and bool(value.strip())
+
+    def strings(value: Any) -> bool:
+        return isinstance(value, list) and all(text(item) for item in value)
+
+    def fields(row: Any, checks: dict[str, Any], name: str) -> None:
+        require(isinstance(row, dict), name)
+        for key, check in checks.items():
+            require(key in row and check(row[key]), f"{name}.{key}")
+
+    def iso_date(value: Any) -> bool:
+        return isinstance(value, str) and date.fromisoformat(value).isoformat() == value
+
+    require(isinstance(result, dict), "root")
+    for name in ("nodes", "edges", "clusters", "cluster_edges", "top"):
+        require(isinstance(result.get(name), list), name)
+    report = result["report"]
+    fields(
+        report,
+        {
+            **dict.fromkeys(
+                (
+                    "n_nodes",
+                    "n_edges",
+                    "n_transactions",
+                    "n_seed",
+                    "n_clusters",
+                    "n_isolates",
+                    "n_boundary",
+                    "n_components",
+                    "n_connected_components",
+                    "betweenness_pivots",
+                ),
+                integer,
+            ),
+            "runtime_seconds": number,
+            "turnover_kzt": number,
+            "rules_version": text,
+            "warnings": strings,
+            "rules": lambda value: isinstance(value, dict),
+            "betweenness_method": lambda value: value in ("exact", "sampled"),
+            "period_from": lambda value: value is None or iso_date(value),
+            "period_to": lambda value: value is None or iso_date(value),
+        },
+        "report",
+    )
+    require(report["rules"].get("version") == report["rules_version"], "rules_version")
+    weights = report["rules"]["priority_weights"]
+    metrics = {"pagerank", "betweenness", "seed_reach", "in_deg", "out_deg", "volume"}
+    require(isinstance(weights, dict) and set(weights) == metrics, "priority_weights")
+    require(
+        all(number(w, maximum=1) for w in weights.values())
+        and math.isclose(sum(weights.values()), 1),
+        "priority_weights",
+    )
+    digests = report["input_sha256"]
+    require(isinstance(digests, dict) and set(digests) == set(FILES), "input_sha256")
+    require(
+        all(
+            isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v)
+            for v in digests.values()
+        ),
+        "input_sha256",
+    )
     nodes = result["nodes"]
-    if len(nodes) != result["report"]["n_nodes"] or len({r["gid"] for r in nodes}) != len(nodes):
-        raise DataError("Потеря или дублирование узлов при расчёте")
+    require(bool(nodes) and len(nodes) == report["n_nodes"], "n_nodes")
+
+    def score(value: Any) -> bool:
+        return number(value, maximum=1)
+
+    def boolean(value: Any) -> bool:
+        return type(value) is bool
+
+    node_checks = {
+        "gid": identifier,
+        "role": lambda value: isinstance(value, str) and value in LABELS,
+        "role_score": score,
+        "priority_score": score,
+        "cluster_id": integer,
+        "depth": lambda value: integer(value) and value <= 4,
+        "rank": lambda value: integer(value, 1),
+        "evidence": lambda value: text(value) and len(value) <= 200,
+        "why": text,
+        "warnings": strings,
+        "next_checks": strings,
+        **dict.fromkeys(("is_seed", "boundary_censored", "isolated", "self_only"), boolean),
+        **dict.fromkeys(
+            ("in_deg", "out_deg", "in_tx", "out_tx", "seed_reach", "self_transfer_tx"), integer
+        ),
+        **dict.fromkeys(
+            ("in_kzt", "out_kzt", "volume", "pagerank", "betweenness", "self_transfer_kzt"), number
+        ),
+        "pass_through": lambda value: value is None or number(value),
+    }
     for row in nodes:
-        if (
-            row["role"] not in LABELS
-            or not row["evidence"]
-            or len(row["evidence"]) > 200
-            or not all(
-                math.isfinite(row[k]) and 0 <= row[k] <= 1 for k in ("role_score", "priority_score")
+        fields(row, node_checks, "node")
+        bounds = row["rank_range"]
+        require(
+            isinstance(bounds, list)
+            and len(bounds) == 2
+            and all(integer(v, 1) for v in bounds)
+            and bounds[0] <= row["rank"] <= bounds[1] <= len(nodes),
+            "rank_range",
+        )
+        parts = row["priority_parts"]
+        require(
+            isinstance(parts, dict)
+            and set(parts) == metrics
+            and all(score(v) for v in parts.values()),
+            "priority_parts",
+        )
+        require(
+            math.isclose(sum(parts.values()), row["priority_score"], abs_tol=4e-6),
+            "priority_parts sum",
+        )
+        require(
+            strings(row["matched_rules"]) and all(role in LABELS for role in row["matched_rules"]),
+            "matched_rules",
+        )
+        require(isinstance(row["rule_trace"], list), "rule_trace")
+        for trace in row["rule_trace"]:
+            fields(
+                trace,
+                {
+                    "role": lambda v: isinstance(v, str) and v in LABELS,
+                    "matched": boolean,
+                    "support": score,
+                    "raw_support": number,
+                    "observation_multiplier": score,
+                },
+                "rule_trace",
             )
-        ):
-            raise DataError("Некорректный результат классификации")
-    if sum(c["n_nodes"] for c in result["clusters"]) != len(nodes):
-        raise DataError("Неполное покрытие кластеров")
+        temporal_data = row["temporal"]
+        fields(
+            temporal_data,
+            {
+                "daily": lambda v: isinstance(v, list),
+                "active_days": integer,
+                "max_same_day_senders": integer,
+                "peak_in_share": score,
+                "matched_1_2d_share": score,
+                "matched_1_2d_kzt": number,
+                "same_day_overlap_kzt": number,
+                "in_kzt": number,
+                "out_kzt": number,
+            },
+            "temporal",
+        )
+        for day in temporal_data["daily"]:
+            fields(
+                day,
+                {
+                    "date": iso_date,
+                    "in_kzt": number,
+                    "out_kzt": number,
+                    "in_tx": integer,
+                    "out_tx": integer,
+                    "senders": integer,
+                    "receivers": integer,
+                },
+                "daily",
+            )
+        dates = [day["date"] for day in temporal_data["daily"]]
+        require(
+            dates == sorted(set(dates)) and len(dates) == temporal_data["active_days"],
+            "daily dates",
+        )
+    by_id = {row["gid"]: row for row in nodes}
+    require(len(by_id) == len(nodes), "duplicate gid")
+    ranked = sorted(nodes, key=lambda row: (-row["priority_score"], int(row["gid"])))
+    require([row["rank"] for row in ranked] == list(range(1, len(nodes) + 1)), "ranks")
+    expected_counts = Counter(row["role"] for row in nodes)
+    require(
+        report["role_counts"] == {role: expected_counts[role] for role in LABELS}, "role_counts"
+    )
+    for count, field in (
+        ("n_seed", "is_seed"),
+        ("n_isolates", "isolated"),
+        ("n_boundary", "boundary_censored"),
+    ):
+        require(report[count] == sum(row[field] for row in nodes), count)
+    flows: dict[tuple[int, int], float] = defaultdict(float)
+    edge_counts: Counter[tuple[int, int]] = Counter()
+    pairs = set()
+    for edge in result["edges"]:
+        fields(
+            edge,
+            {
+                "src": identifier,
+                "dst": identifier,
+                "sum_kzt": lambda v: number(v) and v > 0,
+                "n_tx": lambda v: integer(v, 1),
+            },
+            "edge",
+        )
+        src, dst = edge["src"], edge["dst"]
+        require(src in by_id and dst in by_id and (src, dst) not in pairs, "edge endpoints")
+        pairs.add((src, dst))
+        cluster_pair = (by_id[src]["cluster_id"], by_id[dst]["cluster_id"])
+        flows[cluster_pair] += edge["sum_kzt"]
+        edge_counts[cluster_pair] += 1
+    require(len(pairs) == report["n_edges"], "n_edges")
+    require(
+        sum(edge["n_tx"] for edge in result["edges"]) == report["n_transactions"], "n_transactions"
+    )
+    require(
+        math.isclose(
+            sum(edge["sum_kzt"] for edge in result["edges"]), report["turnover_kzt"], abs_tol=0.01
+        ),
+        "turnover_kzt",
+    )
+    members: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in ranked:
+        members[row["cluster_id"]].append(row)
+    cluster_ids = set()
+    for cluster in result["clusters"]:
+        fields(
+            cluster,
+            {
+                "cluster_id": integer,
+                "n_nodes": lambda v: integer(v, 1),
+                "n_seed": integer,
+                "sum_kzt_internal": number,
+                "top_gids": lambda v: isinstance(v, list) and all(identifier(gid) for gid in v),
+                "hypothesis": text,
+                "incoming_kzt": number,
+                "outgoing_kzt": number,
+                "boundary_nodes": integer,
+            },
+            "cluster",
+        )
+        cid = cluster["cluster_id"]
+        require(cid in members and cid not in cluster_ids, "cluster membership")
+        cluster_ids.add(cid)
+        group = members[cid]
+        require(
+            cluster["n_nodes"] == len(group)
+            and cluster["n_seed"] == sum(row["is_seed"] for row in group),
+            "cluster counts",
+        )
+        require(cluster["top_gids"] == [row["gid"] for row in group[:5]], "cluster top_gids")
+        require(
+            cluster["role_counts"] == dict(Counter(row["role"] for row in group)),
+            "cluster role_counts",
+        )
+        require(
+            math.isclose(cluster["sum_kzt_internal"], flows[(cid, cid)], abs_tol=0.01),
+            "cluster internal turnover",
+        )
+    require(
+        cluster_ids == set(members) and len(cluster_ids) == report["n_clusters"],
+        "clusters coverage",
+    )
+    linked = set()
+    for edge in result["cluster_edges"]:
+        fields(
+            edge,
+            {"src": integer, "dst": integer, "sum_kzt": number, "n_edges": lambda v: integer(v, 1)},
+            "cluster_edge",
+        )
+        pair = (edge["src"], edge["dst"])
+        require(
+            pair[0] != pair[1] and pair not in linked and pair in edge_counts,
+            "cluster_edge endpoints",
+        )
+        require(
+            edge["n_edges"] == edge_counts[pair]
+            and math.isclose(edge["sum_kzt"], flows[pair], abs_tol=0.01),
+            "cluster_edge totals",
+        )
+        linked.add(pair)
+    require(
+        linked == {pair for pair in edge_counts if pair[0] != pair[1]}, "cluster_edges coverage"
+    )
+    top_fields = ("rank", "gid", "role", "priority_score", "why")
+    require(
+        result["top"] == [{key: row[key] for key in top_fields} for row in ranked[:50]],
+        "top_nodes schema/ranking",
+    )
+    stability = report["sensitivity"]
+    fields(
+        stability,
+        {
+            "top_n": lambda v: integer(v, 1) and v == min(20, len(nodes)),
+            "minimum_top_overlap": score,
+            "caveat": text,
+            "scenarios": lambda v: isinstance(v, list) and len(v) == 2 * len(metrics),
+        },
+        "sensitivity",
+    )
+    for scenario in stability["scenarios"]:
+        fields(
+            scenario,
+            {
+                "metric": lambda v: isinstance(v, str) and v in metrics,
+                "multiplier": lambda v: v in (0.8, 1.2),
+                "top_overlap": score,
+            },
+            "sensitivity scenario",
+        )
 
 
 def write_result(result: dict[str, Any], out_dir: Path) -> None:

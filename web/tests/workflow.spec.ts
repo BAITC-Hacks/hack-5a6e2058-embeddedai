@@ -51,7 +51,7 @@ test("sensitivity, removal simulation, community overview and PNG", async ({page
   await expect(page.locator("#resilience-result")).toContainText("Удалено 5 активных узлов");
   await expect(page.locator("#resilience-result tbody tr")).toHaveCount(3);
   await page.locator("#community-map").click();
-  await expect(page.locator("#graph-count")).toContainText("сообществ");
+  await expect(page.locator("#graph-count")).toContainText(/^\d+ сообществ/);
   const pending = page.waitForEvent("download");
   await page.locator("#graph-png").click();
   const download = await pending;
