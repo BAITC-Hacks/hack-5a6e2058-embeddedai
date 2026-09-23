@@ -59,8 +59,10 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         candidates["terminal"] = 0.50 + 0.30 * row["p_in_tx"] + 0.20 * support(row["in_deg"], 3)
     role = next(iter(candidates), "peripheral")
     score = candidates.get(role, 0.0)
-    if row["is_seed"] or row["boundary_censored"]:
-        score *= cfg["incomplete_support_multiplier"]
+    multiplier = (
+        cfg["incomplete_support_multiplier"] if row["is_seed"] or row["boundary_censored"] else 1.0
+    )
+    score *= multiplier
     warnings = []
     if row["boundary_censored"]:
         warnings.append("Граница 4-го уровня: дальнейшие переводы не наблюдаются")
@@ -70,6 +72,11 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         )
     if row["isolated"]:
         warnings.append("Узел включён в исходный список, но не имеет наблюдаемых рёбер")
+    if row.get("self_transfer_tx", 0):
+        warnings.append(
+            f"Самопереводы: {row['self_transfer_tx']} операций, {row['self_transfer_kzt']:,.2f} KZT. "
+            "Сохранены в графе и общем обороте; исключены из потоков между контрагентами, метрик ролей и хронологии."
+        )
     if row["observed_out_exceeds_in"]:
         warnings.append("Выход превышает наблюдаемый вход: это не доказательство аномалии")
     if role == "terminal":
@@ -86,6 +93,8 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     evidence = criteria[role]
     if role == "peripheral" and (row["boundary_censored"] or row["is_seed"] or row["isolated"]):
         evidence = f"Недостаточно наблюдений для роли; плательщиков {row['in_deg']}, получателей {row['out_deg']}."
+    if row.get("self_only", False):
+        evidence = "Наблюдаются только самопереводы; связей с другими клиентами нет. Недостаточно данных для роли."
     if row["boundary_censored"]:
         evidence += " Граница depth=4: удержание неизвестно."
     elif row["isolated"]:
@@ -97,7 +106,13 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         "role_score": round(max(0, min(score, 1)), 6),
         "matched_rules": list(candidates),
         "rule_trace": [
-            {"role": key, "matched": key in candidates, "support": round(value, 6)}
+            {
+                "role": key,
+                "matched": True,
+                "support": round(max(0, min(value * multiplier, 1)), 6),
+                "raw_support": round(value, 6),
+                "observation_multiplier": multiplier,
+            }
             for key, value in candidates.items()
         ],
         "evidence": evidence[:200],

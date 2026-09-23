@@ -34,14 +34,20 @@ def clean(value: Any) -> Any:
 
 
 def read_rules(path: Path | None = None) -> dict[str, Any]:
+    if path is None:
+        source_path = ROOT / "config/rules.json"
+        path = (
+            source_path if source_path.is_file() else Path(__file__).parent / "resources/rules.json"
+        )
     try:
-        cfg = json.loads((path or ROOT / "config/rules.json").read_text())
+        cfg = json.loads(path.read_text())
     except (OSError, ValueError) as exc:
         raise DataError("Не удалось прочитать конфигурацию правил JSON") from exc
     integers = (
         "random_seed",
         "max_depth",
         "betweenness_samples",
+        "betweenness_exact_max_nodes",
         "coordinator_min_seeds",
         "coordinator_min_in",
         "coordinator_min_out",
@@ -152,6 +158,14 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
         "n_clusters": len(clusters),
         "n_isolates": int(frame.isolated.sum()),
         "n_boundary": int(frame.boundary_censored.sum()),
+        "n_self_transfer_nodes": int((frame.self_transfer_tx > 0).sum()),
+        "self_transfer_kzt": round(float(frame.self_transfer_kzt.sum()), 2),
+        "betweenness_method": "exact"
+        if len(nodes) <= rules["betweenness_exact_max_nodes"]
+        else "sampled",
+        "betweenness_pivots": len(nodes)
+        if len(nodes) <= rules["betweenness_exact_max_nodes"]
+        else min(rules["betweenness_samples"], len(nodes)),
         "n_components": nx.number_weakly_connected_components(graph),
         "n_connected_components": sum(len(c) > 1 for c in nx.weakly_connected_components(graph)),
         "sensitivity": stability,

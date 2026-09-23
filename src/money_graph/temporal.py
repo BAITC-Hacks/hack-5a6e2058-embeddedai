@@ -9,6 +9,8 @@ import pandas as pd
 def summarize(transactions: pd.DataFrame, gids: list[int]) -> dict[int, dict[str, Any]]:
     days: dict[int, dict[str, dict[str, Any]]] = {gid: {} for gid in gids}
     for tx in transactions.to_dict("records"):
+        if tx["src"] == tx["dst"]:
+            continue
         date = tx["date"].date().isoformat()
         for gid, direction, other in ((tx["dst"], "in", tx["src"]), (tx["src"], "out", tx["dst"])):
             day = days[gid].setdefault(

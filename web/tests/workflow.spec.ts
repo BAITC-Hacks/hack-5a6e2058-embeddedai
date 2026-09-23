@@ -18,6 +18,9 @@ test("exact identifiers, isolated seed, unknown ID and error recovery", async ({
   await page.locator("#gid").fill("123456789");
   await page.locator("#search-form button").click();
   await expect(page.locator("#alert")).toContainText("Такого gid нет");
+  await expect(page.locator("#graph")).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator("#graph-count")).toHaveText("Граф не загружен");
+  await expect(page.locator("#gid")).toHaveValue("123456789");
   await page.locator(".top-item").first().click();
   await expect(page.locator("#alert")).toBeHidden();
 });

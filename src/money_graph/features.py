@@ -37,17 +37,29 @@ def projection(graph: nx.DiGraph) -> nx.Graph:
 
 def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd.DataFrame:
     frame = nodes.copy().set_index("gid")
+    # A transfer to the same client is observed turnover, but not movement
+    # between counterparties and cannot support a transit or intermediary role.
+    external = graph.copy()
+    external.remove_edges_from(nx.selfloop_edges(graph))
+    self_flows = {gid: graph.get_edge_data(gid, gid, {}) for gid in graph}
+    frame["self_transfer_kzt"] = pd.Series(
+        {gid: attrs.get("sum_kzt", 0.0) for gid, attrs in self_flows.items()}
+    )
+    frame["self_transfer_tx"] = pd.Series(
+        {gid: attrs.get("n_tx", 0) for gid, attrs in self_flows.items()}
+    )
+    exact = len(external) <= rules["betweenness_exact_max_nodes"]
     for column, values in {
-        "in_deg": dict(graph.in_degree()),
-        "out_deg": dict(graph.out_degree()),
-        "in_kzt": dict(graph.in_degree(weight="sum_kzt")),
-        "out_kzt": dict(graph.out_degree(weight="sum_kzt")),
-        "in_tx": dict(graph.in_degree(weight="n_tx")),
-        "out_tx": dict(graph.out_degree(weight="n_tx")),
-        "pagerank": nx.pagerank(graph, weight="sum_kzt", max_iter=500),
+        "in_deg": dict(external.in_degree()),
+        "out_deg": dict(external.out_degree()),
+        "in_kzt": dict(external.in_degree(weight="sum_kzt")),
+        "out_kzt": dict(external.out_degree(weight="sum_kzt")),
+        "in_tx": dict(external.in_degree(weight="n_tx")),
+        "out_tx": dict(external.out_degree(weight="n_tx")),
+        "pagerank": nx.pagerank(external, weight="sum_kzt", max_iter=500),
         "betweenness": nx.betweenness_centrality(
-            graph,
-            k=min(rules["betweenness_samples"], len(graph)),
+            external,
+            k=None if exact else min(rules["betweenness_samples"], len(external)),
             seed=rules["random_seed"],
             weight=None,
         ),
@@ -61,7 +73,9 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
             if gid != seed:
                 reach[gid] += 1
     frame["seed_reach"] = pd.Series(reach)
-    frame["isolated"] = (frame.in_deg + frame.out_deg) == 0
+    no_counterparties = (frame.in_deg + frame.out_deg) == 0
+    frame["self_only"] = no_counterparties & (frame.self_transfer_tx > 0)
+    frame["isolated"] = no_counterparties & ~frame.self_only
     frame["boundary_censored"] = (frame.depth == rules["max_depth"]) & (frame.out_deg == 0)
     frame["inflow_unobserved"] = frame.in_kzt == 0
     frame["observed_out_exceeds_in"] = frame.out_kzt > frame.in_kzt
@@ -78,11 +92,11 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
         "out_kzt",
         "volume",
     ):
-        frame[f"p_{metric}"] = percentile(frame[metric], ~frame.isolated)
+        frame[f"p_{metric}"] = percentile(frame[metric], ~no_counterparties)
     frame["priority_score"] = sum(
         frame[f"p_{name}"] * weight for name, weight in rules["priority_weights"].items()
     )
-    frame.loc[frame.isolated, "priority_score"] = 0.0
+    frame.loc[no_counterparties, "priority_score"] = 0.0
     return frame.reset_index()
 
 

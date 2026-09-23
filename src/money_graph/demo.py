@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import networkx as nx
 import pandas as pd
 
 
@@ -35,6 +36,19 @@ def create_demo(directory: Path) -> None:
         transfer(i, 40 + i % 15, 10_000, 3)
     for i in range(40, 55):
         transfer(i, 55 + i % 25, 5000, 4)
+    # Every non-seed has a documented path; keep seed #7 as a true isolate.
+    reached = {r["src"] for r in tx} | {r["dst"] for r in tx}
+    for index in range(8, 80):
+        if base + index not in reached:
+            transfer(40, index, 5000, 5)
+    graph = nx.DiGraph()
+    graph.add_edges_from((r["src"], r["dst"]) for r in tx)
+    distances = {}
+    for seed in range(7):
+        for gid, distance in nx.single_source_shortest_path_length(graph, base + seed).items():
+            distances[gid] = min(distances.get(gid, distance), distance)
+    for row in nodes:
+        row["depth"] = 0 if row["is_seed"] else distances[row["gid"]]
     transactions = pd.DataFrame(tx)
     edges = transactions.groupby(["src", "dst"], as_index=False).agg(
         sum_kzt=("sum_kzt", "sum"), n_tx=("sum_kzt", "size")

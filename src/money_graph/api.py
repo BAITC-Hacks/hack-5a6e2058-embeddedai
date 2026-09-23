@@ -1,23 +1,21 @@
 """Local-first API. Unpredictable run IDs are capability links for uploaded runs."""
 
-import json
+import hashlib
 import os
-import re
 import secrets
-import shutil
 import tempfile
 import threading
-import time
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from . import storage as store
 from .demo import create_demo
 from .investigation import node_evidence, resilience
-from .loader import DataError
+from .loader import FILES, DataError
 from .pipeline import EXPORTS, ROOT, analyze, read_rules, write_result
 from .roles import LABELS
 
@@ -25,22 +23,29 @@ MAX_FILE_BYTES = 10 * 1024 * 1024
 
 
 def create_app(initial_data: Path | None = None, storage: Path | None = None) -> FastAPI:
-    app = FastAPI(title="Граф денег", version="0.2.0")
+    app = FastAPI(title="Граф денег", version="0.3.0")
     directory = (storage or Path(os.getenv("MONEY_GRAPH_STORAGE", ROOT / "var/runs"))).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     gate = threading.Lock()
-    bootstrap_file = directory / "bootstrap.json"
-    version = read_rules()["version"]
+    rules = read_rules()
+    initial = store.read_bootstrap(directory)
     current = False
-    if bootstrap_file.exists():
-        previous = json.loads(bootstrap_file.read_text())
-        stored = directory / previous["run_id"] / "result.json"
-        current = (
-            stored.is_file()
-            and json.loads(stored.read_text())["report"]["rules_version"] == version
-        )
-    if not current or initial_data is not None:
-        demo = initial_data is None
+    demo = initial_data is None
+    if initial and initial["synthetic"] == demo:
+        try:
+            saved = store.read_result(directory, initial["run_id"])
+            current = saved["report"].get("rules") == rules
+            if current and initial_data is not None:
+                digests = {
+                    name: hashlib.sha256(
+                        (initial_data / f"{name}.parquet").read_bytes()
+                    ).hexdigest()
+                    for name in FILES
+                }
+                current = saved["report"].get("input_sha256") == digests
+        except (store.MissingRun, store.CorruptRun, OSError):
+            current = False
+    if not current:
         if demo:
             with tempfile.TemporaryDirectory() as temp:
                 create_demo(Path(temp))
@@ -49,31 +54,45 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
             result = analyze(initial_data)  # type: ignore[arg-type]
         run_id = secrets.token_hex(16)
         write_result(result, directory / run_id)
-        bootstrap_file.write_text(json.dumps({"run_id": run_id, "synthetic": demo}))
-    bootstrap = json.loads(bootstrap_file.read_text())
+        initial = {"run_id": run_id, "synthetic": demo}
+        store.write_bootstrap(directory, initial)
+    assert initial is not None
+    bootstrap = initial
 
     def result_for(run_id: str) -> dict[str, Any]:
-        if not re.fullmatch(r"[a-f0-9]{32}", run_id):
-            raise HTTPException(404, "Расчёт не найден")
-        path = directory / run_id / "result.json"
-        if not path.is_file():
+        try:
+            result = store.read_result(directory, run_id)
+        except store.MissingRun as exc:
             raise HTTPException(
                 404, "Расчёт не найден или срок хранения истёк; загрузите данные повторно"
-            )
-        result = json.loads(path.read_text())
-        if result["report"]["rules_version"] != version:
+            ) from exc
+        except store.CorruptRun as exc:
+            raise HTTPException(
+                503,
+                "Сохранённый расчёт повреждён. Скачайте доступные CSV или загрузите файлы повторно",
+            ) from exc
+        if result["report"].get("rules") != rules:
             raise HTTPException(
                 409,
-                "Правила анализа обновлены. Загрузите исходные файлы повторно; прежние CSV сохранены на сервере",
+                "Конфигурация анализа обновлена. Загрузите файлы повторно; прежние CSV доступны по сохранённым ссылкам выгрузки",
             )
         return result
 
+    @app.middleware("http")
+    async def response_headers(request: Any, call_next: Any) -> Response:
+        response = await call_next(request)
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": "0.2.0"}
+        return {"status": "ok", "version": "0.3.0"}
 
     @app.get("/api/bootstrap")
-    def initial() -> dict[str, Any]:
+    def initial_run() -> dict[str, Any]:
         return {**bootstrap, "labels": LABELS, "upload_limit_mb": 10, "llm_enabled": False}
 
     @app.post("/api/analyze")
@@ -85,21 +104,6 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
         if not gate.acquire(blocking=False):
             raise HTTPException(429, "Расчёт уже выполняется. Повторите через несколько секунд")
         try:
-            now = time.time()
-            # Retain the demo and bound uploaded generations by age and count.
-            saved = sorted(
-                [
-                    p
-                    for p in directory.iterdir()
-                    if p.is_dir()
-                    and re.fullmatch(r"[a-f0-9]{32}", p.name)
-                    and p.name != bootstrap["run_id"]
-                ],
-                key=lambda p: p.stat().st_mtime,
-            )
-            for index, path in enumerate(saved):
-                if now - path.stat().st_mtime > 86400 or index < len(saved) - 19:
-                    shutil.rmtree(path)
             with tempfile.TemporaryDirectory(dir=directory) as temp:
                 source = Path(temp)
                 for name, file in (
@@ -114,6 +118,7 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
                 result = analyze(source)
             run_id = secrets.token_hex(16)
             write_result(result, directory / run_id)
+            store.prune(directory, bootstrap["run_id"], run_id)
             return {"run_id": run_id, "report": result["report"], "synthetic": False}
         except DataError as exc:
             raise HTTPException(422, str(exc)) from exc
@@ -161,8 +166,9 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
             raise HTTPException(404, "Такого gid нет в наборе. Вставьте полный идентификатор")
         return {
             **row,
-            "incoming": [e for e in result["edges"] if e["dst"] == gid],
-            "outgoing": [e for e in result["edges"] if e["src"] == gid],
+            "incoming": [e for e in result["edges"] if e["dst"] == gid and e["src"] != gid],
+            "outgoing": [e for e in result["edges"] if e["src"] == gid and e["dst"] != gid],
+            "self_transfers": [e for e in result["edges"] if e["src"] == gid and e["dst"] == gid],
         }
 
     @app.get("/api/runs/{run_id}/graph")
@@ -221,12 +227,19 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
         }
 
     @app.get("/api/runs/{run_id}/exports/{name}")
-    def export(run_id: str, name: str) -> FileResponse:
-        result_for(run_id)
+    def export(run_id: str, name: str) -> Response:
         if name not in EXPORTS:
             raise HTTPException(404, "Неизвестная выгрузка")
-        return FileResponse(
-            directory / run_id / name, media_type="text/csv; charset=utf-8", filename=name
+        try:
+            content = (store.run_path(directory, run_id) / name).read_bytes()
+        except (store.MissingRun, FileNotFoundError) as exc:
+            raise HTTPException(404, "Выгрузка не найдена или срок хранения истёк") from exc
+        except OSError as exc:
+            raise HTTPException(503, "Не удалось прочитать выгрузку; повторите позже") from exc
+        return Response(
+            content,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
         )
 
     static = ROOT / "web/dist"

@@ -1,6 +1,6 @@
 [project]
 name = "money-graph"
-version = "0.2.0"
+version = "0.3.0"
 description = "Explainable transaction network analysis for HackAlem"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -17,6 +17,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/money_graph"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"config/rules.json" = "money_graph/resources/rules.json"
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "httpx>=0.28,<1", "ruff>=0.11,<1", "mypy>=1.15,<2", "pandas-stubs", "types-networkx"]

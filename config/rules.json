@@ -1,8 +1,9 @@
 {
-  "version": "2.0",
+  "version": "2.1",
   "random_seed": 42,
   "max_depth": 4,
   "betweenness_samples": 128,
+  "betweenness_exact_max_nodes": 2500,
   "louvain_resolution": 1.0,
   "coordinator_min_seeds": 2,
   "coordinator_min_in": 3,

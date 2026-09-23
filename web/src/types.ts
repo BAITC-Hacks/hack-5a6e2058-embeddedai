@@ -16,6 +16,17 @@ export interface Edge {
   n_tx: number;
 }
 export interface NodeDetail extends GraphNode {
+  self_transfer_kzt: number;
+  self_transfer_tx: number;
+  self_only: boolean;
+  self_transfers: Edge[];
+  rule_trace: {
+    role: string;
+    matched: boolean;
+    support: number;
+    raw_support: number;
+    observation_multiplier: number;
+  }[];
   temporal: Temporal;
   rank_range: [number, number];
   volume: number;
@@ -39,6 +50,8 @@ export interface NodeDetail extends GraphNode {
   outgoing: Edge[];
 }
 export interface Report {
+  betweenness_method: "exact" | "sampled";
+  betweenness_pivots: number;
   sensitivity: Sensitivity;
   rules: { priority_weights: Record<string, number>; [key: string]: unknown };
   input_sha256: Record<string, string>;

@@ -51,18 +51,19 @@ export async function openInvestigation(
         void select(button.dataset.evidenceGid ?? "");
       };
   } catch (error) {
+    if (sequence !== investigationSequence) return;
     $("investigation-content").textContent =
       error instanceof Error ? error.message : "Не удалось загрузить факты";
   }
 }
 export function downloadDossier(node: NodeDetail, report: Report) {
-  const text = `# Справка по узлу ${node.gid}\n\nПравила v${report.rules_version}; период ${report.period_from} — ${report.period_to}.\n\nРоль-гипотеза: ${labels[node.role]}.\n${node.evidence}\n\nПриоритет: ${percent(node.priority_score)}, место ${node.rank}. Диапазон места при изменении весов ±20%: ${node.rank_range.join("–")}; это не доверительный интервал.\n\nВход: ${money(node.in_kzt)}, выход: ${money(node.out_kzt)}. Плательщиков ${node.in_deg}, получателей ${node.out_deg}, seed-предков ${node.seed_reach}.\n\n## Вклад в приоритет\n\n${Object.entries(
+  const text = `# Справка по узлу ${node.gid}\n\nПравила v${report.rules_version}; период ${report.period_from} — ${report.period_to}.\n\nРоль-гипотеза: ${labels[node.role]}.\n${node.evidence}\n\nПриоритет: ${percent(node.priority_score)}, место ${node.rank}. Диапазон места при изменении весов ±20%: ${node.rank_range.join("–")}; это не доверительный интервал.\n\nВход от других клиентов: ${money(node.in_kzt)}, выход другим клиентам: ${money(node.out_kzt)}. Самопереводы отдельно: ${money(node.self_transfer_kzt)}, ${node.self_transfer_tx} операций. Плательщиков ${node.in_deg}, получателей ${node.out_deg}, seed-предков ${node.seed_reach}.\n\n## Вклад в приоритет\n\n${Object.entries(
     node.priority_parts,
   )
     .map(([key, v]) => `- ${metricLabels[key]}: ${(v * 100).toFixed(2)} п.п.`)
     .join(
       "\n",
-    )}\n\n## Временные наблюдения\n\nСовместимо с выходом через 1–2 дня: ${money(node.temporal.matched_1_2d_kzt)} (${percent(node.temporal.matched_1_2d_share)} входа). Не доказательство транзита тех же денег.\n\n| Дата | Вход KZT | Выход KZT | Плательщики | Получатели |\n|---|---:|---:|---:|---:|\n${node.temporal.daily.map((d) => `| ${d.date} | ${d.in_kzt} | ${d.out_kzt} | ${d.senders} | ${d.receivers} |`).join("\n")}\n\n## Ограничения\n\n${[...report.warnings, ...node.warnings].map((x) => `- ${x}`).join("\n")}\n\n## Следующие проверки\n\n${node.next_checks.map((x) => `- ${x}`).join("\n")}\n\n## Связи\n\n${[...node.incoming, ...node.outgoing].map((e) => `- ${e.src} → ${e.dst}: ${money(e.sum_kzt)}, ${e.n_tx} переводов`).join("\n")}\n\n## Происхождение данных (SHA-256)\n\n${Object.entries(
+    )}\n\n## Временные наблюдения\n\nСовместимо с выходом через 1–2 дня: ${money(node.temporal.matched_1_2d_kzt)} (${percent(node.temporal.matched_1_2d_share)} входа). Не доказательство транзита тех же денег.\n\n| Дата | Вход KZT | Выход KZT | Плательщики | Получатели |\n|---|---:|---:|---:|---:|\n${node.temporal.daily.map((d) => `| ${d.date} | ${d.in_kzt} | ${d.out_kzt} | ${d.senders} | ${d.receivers} |`).join("\n")}\n\n## Ограничения\n\n${[...report.warnings, ...node.warnings].map((x) => `- ${x}`).join("\n")}\n\n## Следующие проверки\n\n${node.next_checks.map((x) => `- ${x}`).join("\n")}\n\n## Связи\n\n${[...node.incoming, ...node.outgoing, ...node.self_transfers].map((e) => `- ${e.src} → ${e.dst}: ${money(e.sum_kzt)}, ${e.n_tx} переводов`).join("\n")}\n\n## Происхождение данных (SHA-256)\n\n${Object.entries(
     report.input_sha256,
   )
     .map(([k, v]) => `- ${k}: ${v}`)

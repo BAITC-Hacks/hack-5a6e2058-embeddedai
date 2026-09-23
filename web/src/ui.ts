@@ -32,12 +32,28 @@ export const escapeHtml = (value: unknown) =>
   );
 export const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+  }
+}
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, { signal: AbortSignal.timeout(45000), ...options });
+  let response: Response;
+  try {
+    response = await fetch(path, { signal: AbortSignal.timeout(45000), ...options });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError")
+      throw new Error("Сервер не ответил вовремя. Повторите действие или проверьте соединение.");
+    throw new Error("Нет связи с сервером. Проверьте соединение и повторите действие.");
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(
+    throw new ApiError(
       typeof body.detail === "string" ? body.detail : `Ошибка сервера (${response.status})`,
+      response.status,
     );
   }
   return response.json();

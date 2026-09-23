@@ -143,7 +143,7 @@ def sensitivity(records: list[dict[str, Any]], weights: dict[str, float]) -> dic
             ranked = sorted(
                 records,
                 key=lambda n: (
-                    -sum(n[f"p_{k}"] * w / denominator for k, w in adjusted.items()),
+                    -round(sum(n[f"p_{k}"] * w / denominator for k, w in adjusted.items()), 6),
                     int(n["gid"]),
                 ),
             )

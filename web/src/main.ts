@@ -12,6 +12,7 @@ import type {
 } from "./types";
 import {
   $,
+  ApiError,
   api,
   colors,
   communityColor,
@@ -53,17 +54,19 @@ $("app").innerHTML = `
       <div class="panel-heading list-heading"><h2>Приоритет проверки</h2><span class="tag small">TOP 50</span></div><div id="top-list" class="top-list"></div>
     </aside>
     <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button></div><div><button id="fit" class="icon-button" title="Вместить граф">⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
-      <div class="graph-options"><button id="community-map" class="text-button">Обзор сообществ</button><label for="color-mode">Цвет</label><select id="color-mode"><option value="role">По роли</option><option value="cluster">По сообществу</option></select><button id="graph-png" class="text-button">PNG ↓</button></div><div id="edge-info" class="edge-info" hidden></div><div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
+      <div class="graph-options"><button id="community-map" class="text-button">Обзор сообществ</button><label for="color-mode">Цвет</label><select id="color-mode"><option value="role">По роли</option><option value="cluster">По сообществу</option></select><button id="graph-png" class="text-button">PNG ↓</button></div><div id="edge-info" class="edge-info" hidden></div><div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count" role="status">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
       <div id="clusters-view" hidden></div><div id="analysis-view" hidden></div>
       <div id="graph-legend" class="legend">${Object.entries(labels)
         .map(([key, label]) => `<span><i style="background:${colors[key]}"></i>${label}</span>`)
         .join("")}<span class="legend-note">◆ seed · пунктир — граница наблюдения</span></div>
     </section>
-    <aside id="detail" class="detail"><div class="empty-card"><span class="empty-symbol">⌘</span><h2>За каждым узлом — факты</h2><p>Выберите узел на карте или в списке приоритетов. Здесь появятся его потоки, роль и основания для проверки.</p><div class="subtle-box">Роль — гипотеза по наблюдаемым данным, а не вывод о виновности.</div></div></aside>
+    <aside id="detail" class="detail" aria-label="Карточка выбранного узла"><div class="empty-card"><span class="empty-symbol">⌘</span><h2>За каждым узлом — факты</h2><p>Выберите узел на карте или в списке приоритетов. Здесь появятся его потоки, роль и основания для проверки.</p><div class="subtle-box">Роль — гипотеза по наблюдаемым данным, а не вывод о виновности.</div></div></aside>
   </section><footer><span>EmbeddedAi · HackAlem 2026</span><span id="limitations">4 уровня · только внутрибанковские переводы · порог 5 000 ₸</span></footer></main>
-  <dialog id="upload-dialog"><form id="upload-form"><div class="dialog-title"><h2>Новый набор данных</h2><button type="button" id="upload-close" class="icon-button" aria-label="Закрыть">×</button></div><p>Загрузите три файла организаторов. Исходные ID сохраняются без округления.</p>${["nodes", "edges", "transactions"].map((name) => `<label class="file-label">${name}.parquet<input type="file" name="${name}" accept=".parquet" required></label>`).join("")}<p class="fine-print">До 10 МБ на файл. Результаты доступны по ссылке расчёта до 24 часов или до удаления старых запусков.</p><div id="upload-error" class="alert" hidden></div><button id="analyze-button" class="button primary" type="submit">Рассчитать граф →</button></form></dialog>
-  <dialog id="method-dialog"><div class="dialog-title"><h2>Объяснимый расчёт</h2><button id="method-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="method-content"></div></dialog>
-  <dialog id="investigation-dialog" class="wide-dialog"><div class="dialog-title"><h2 id="investigation-title">Доказательная карточка</h2><button id="investigation-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="investigation-content"></div></dialog>`;
+  <dialog id="upload-dialog" aria-labelledby="upload-title"><form id="upload-form"><div class="dialog-title"><h2 id="upload-title">Новый набор данных</h2><button type="button" id="upload-close" class="icon-button" aria-label="Закрыть">×</button></div><p>Загрузите три файла организаторов. Исходные ID сохраняются без округления.</p>${["nodes", "edges", "transactions"].map((name) => `<label class="file-label">${name}.parquet<input type="file" name="${name}" accept=".parquet" required></label>`).join("")}<p class="fine-print">До 10 МБ на файл. Результаты доступны по ссылке расчёта до 24 часов или до удаления старых запусков.</p><div id="upload-error" class="alert" role="alert" hidden></div><button id="analyze-button" class="button primary" type="submit">Рассчитать граф →</button></form></dialog>
+  <dialog id="method-dialog" aria-labelledby="method-title"><div class="dialog-title"><h2 id="method-title">Объяснимый расчёт</h2><button id="method-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="method-content"></div></dialog>
+  <dialog id="investigation-dialog" class="wide-dialog" aria-labelledby="investigation-title"><div class="dialog-title"><h2 id="investigation-title">Доказательная карточка</h2><button id="investigation-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="investigation-content"></div></dialog>`;
+
+const emptyDetail = $("detail").innerHTML;
 
 function alert(message: string) {
   $("alert").textContent = message;
@@ -85,7 +88,7 @@ function showError(error: unknown) {
 
 async function loadRun(id: string) {
   const sequence = ++runSequence;
-  ++detailSequence;
+  clearSelection();
   ++graphSequence;
   const [report, top, clusters] = await Promise.all([
     api<Report>(`/api/runs/${id}`),
@@ -97,7 +100,11 @@ async function loadRun(id: string) {
   runId = id;
   renderAnalysis(report, id, (gid) => selectNode(gid).catch(showError));
   renderMethod(report);
-  localStorage.setItem("money-graph-run", id);
+  try {
+    localStorage.setItem("money-graph-run", id);
+  } catch {
+    // The URL preserves the run even when browser storage is disabled or full.
+  }
   history.replaceState(null, "", `?run=${id}`);
   currentGid = "";
   $("dataset-badge").textContent = report.synthetic ? "СИНТЕТИЧЕСКИЙ ПРИМЕР" : "ЗАГРУЖЕННЫЙ НАБОР";
@@ -121,7 +128,7 @@ async function loadRun(id: string) {
   $("top-list").innerHTML = top
     .map(
       (row) =>
-        `<button class="top-item" data-gid="${row.gid}"><span class="rank">${String(row.rank).padStart(2, "0")}</span><span class="top-main"><span class="gid">${row.gid}</span>${roleTag(row.role)}</span><span class="score">${percent(row.priority_score)}</span></button>`,
+        `<button class="top-item" data-gid="${row.gid}" title="${escapeHtml(row.why)}"><span class="rank">${String(row.rank).padStart(2, "0")}</span><span class="top-main"><span class="gid">${row.gid}</span>${roleTag(row.role)}</span><span class="score">${percent(row.priority_score)}</span></button>`,
     )
     .join("");
   onNodeButtons($("top-list"));
@@ -142,16 +149,52 @@ async function loadRun(id: string) {
   }
   alert("");
   resetOtherFilters();
-  await loadGraph();
+  const selection = detailSequence;
+  await loadGraph().catch(showError);
+  if (sequence !== runSequence || selection !== detailSequence) return;
   const first = top[0];
-  if (first) await selectNode(first.gid, false);
+  if (first) await selectNode(first.gid, false).catch(showError);
 }
 
-function resetOtherFilters(keep = "") {
+function clearSelection() {
+  ++detailSequence;
   currentGid = "";
+  $("detail").innerHTML = emptyDetail;
+  $("detail").setAttribute("aria-busy", "false");
+  $<HTMLInputElement>("gid").value = "";
+  cy?.elements().unselect();
+  for (const button of $("top-list").querySelectorAll("button"))
+    button.classList.remove("selected");
+}
+
+function clearFilterControls(keep = "") {
   for (const id of ["role", "cluster", "depth"])
     if (id !== keep) $<HTMLSelectElement>(id).value = "";
   $<HTMLInputElement>("seeds").checked = false;
+}
+
+function resetOtherFilters(keep = "") {
+  clearSelection();
+  clearFilterControls(keep);
+}
+
+function graphLoading(message: string) {
+  alert("");
+  $("graph").setAttribute("aria-busy", "true");
+  $("graph-count").textContent = message;
+  $("graph-empty").textContent = message;
+  $("graph-empty").hidden = false;
+  cy?.destroy();
+  cy = undefined;
+}
+
+function graphFailed(error: unknown) {
+  $("graph").setAttribute("aria-busy", "false");
+  $("graph-count").textContent = "Граф не загружен";
+  $("graph-empty").textContent =
+    "Не удалось загрузить связи. Повторите поиск или сбросьте фильтры.";
+  $("graph-empty").hidden = false;
+  showError(error);
 }
 
 async function loadGraph(gid?: string, full = false) {
@@ -168,12 +211,20 @@ async function loadGraph(gid?: string, full = false) {
     }
     if ($<HTMLInputElement>("seeds").checked) params.set("seeds", "true");
   }
-  $("graph-count").textContent = "Загрузка связей…";
-  const result = await api<GraphResponse>(`/api/runs/${runId}/graph?${params}`);
+  graphLoading("Загрузка связей…");
+  let result: GraphResponse;
+  try {
+    result = await api<GraphResponse>(`/api/runs/${runId}/graph?${params}`);
+  } catch (error) {
+    if (sequence === graphSequence) graphFailed(error);
+    return;
+  }
   if (sequence !== graphSequence) return;
+  $("graph").setAttribute("aria-busy", "false");
   $("graph-count").textContent =
     `${number(result.shown)} из ${number(result.matched)} подходящих · всего ${number(result.total)}`;
   $("graph-empty").hidden = result.shown > 0;
+  $("graph-empty").textContent = "По этим фильтрам узлов нет";
   cy?.destroy();
   const elements = [
     ...result.nodes.map((n) => ({
@@ -276,28 +327,50 @@ function links(rows: Edge[], incoming: boolean) {
 async function selectNode(gid: string, focusGraph = true) {
   if (!gid) return;
   const sequence = ++detailSequence;
-  const node = await api<NodeDetail>(`/api/runs/${runId}/nodes/${encodeURIComponent(gid)}`);
-  if (sequence !== detailSequence) return;
-  currentGid = gid;
+  if (focusGraph) {
+    ++graphSequence;
+    clearFilterControls();
+    graphLoading("Поиск узла…");
+  }
   alert("");
+  $("detail").setAttribute("aria-busy", "true");
+  $("detail").innerHTML = '<p role="status">Загрузка карточки узла…</p>';
+  let node: NodeDetail;
+  try {
+    node = await api<NodeDetail>(`/api/runs/${runId}/nodes/${encodeURIComponent(gid)}`);
+  } catch (error) {
+    if (sequence !== detailSequence) return;
+    clearSelection();
+    $<HTMLInputElement>("gid").value = gid;
+    $("detail").innerHTML =
+      '<p role="status">Узел не загружен. Проверьте gid и повторите поиск.</p>';
+    if (focusGraph) graphFailed(error);
+    else showError(error);
+    return;
+  }
+  if (sequence !== detailSequence) return;
+  $("detail").setAttribute("aria-busy", "false");
+  currentGid = gid;
+  $<HTMLInputElement>("gid").value = node.gid;
   switchTab(false);
   $("detail").innerHTML =
-    `<div class="panel-heading"><h2>Карточка узла</h2><span class="tag small">#${node.rank}</span></div><p class="node-id gid">${node.gid}</p>${roleTag(node.role)}<div class="node-tags"><span>Уровень ${node.depth}</span><button id="node-cluster" class="text-button">Сообщество #${node.cluster_id} ↗</button>${node.is_seed ? '<span class="tag small">SEED</span>' : ""}</div><div class="score-grid"><div><strong>${percent(node.priority_score)}</strong><span>Приоритет проверки</span></div><div><strong>${percent(node.role_score)}</strong><span>Поддержка правила</span></div></div><p class="fine-print">Место при изменении весов ±20%: ${node.rank_range[0]}–${node.rank_range[1]}. Не доверительный интервал.</p><h3>Почему эта роль</h3><p class="evidence">${escapeHtml(node.evidence)}</p><dl class="node-metrics"><div><dt>Наблюдаемый вход</dt><dd>${money(node.in_kzt)}</dd></div><div><dt>Наблюдаемый выход</dt><dd>${money(node.out_kzt)}</dd></div><div><dt>Плательщики / получатели</dt><dd>${node.in_deg} / ${node.out_deg}</dd></div><div><dt>Переводы: вход / выход</dt><dd>${node.in_tx} / ${node.out_tx}</dd></div><div><dt>Seed-предков</dt><dd>${node.seed_reach}</dd></div></dl><details><summary>Вклад в приоритет и правила</summary>${Object.entries(
+    `<div class="panel-heading"><h2>Карточка узла</h2><span class="tag small">#${node.rank}</span></div><p class="node-id gid">${node.gid}</p>${roleTag(node.role)}<div class="node-tags"><span>Уровень ${node.depth}</span><button id="node-cluster" class="text-button">Сообщество #${node.cluster_id} ↗</button>${node.is_seed ? '<span class="tag small">SEED</span>' : ""}</div><div class="score-grid"><div><strong>${percent(node.priority_score)}</strong><span>Приоритет проверки</span></div><div><strong>${percent(node.role_score)}</strong><span>Поддержка правила</span></div></div><p class="fine-print">Место при изменении весов ±20%: ${node.rank_range[0]}–${node.rank_range[1]}. Не доверительный интервал.</p><h3>Почему эта роль</h3><p class="evidence">${escapeHtml(node.evidence)}</p><button id="investigate-node" class="button primary full-width">Пути, циклы и хронология ↗</button><button id="download-dossier" class="text-button">Скачать справку по узлу ↓</button><dl class="node-metrics"><div><dt>Вход от других клиентов</dt><dd>${money(node.in_kzt)}</dd></div><div><dt>Выход другим клиентам</dt><dd>${money(node.out_kzt)}</dd></div><div><dt>Плательщики / получатели</dt><dd>${node.in_deg} / ${node.out_deg}</dd></div><div><dt>Переводы: вход / выход</dt><dd>${node.in_tx} / ${node.out_tx}</dd></div><div><dt>Seed-предков</dt><dd>${node.seed_reach}</dd></div>${node.self_transfer_tx ? `<div><dt>Самопереводы отдельно</dt><dd>${money(node.self_transfer_kzt)} · ${node.self_transfer_tx} пер.</dd></div>` : ""}</dl><details><summary>Вклад в приоритет и правила</summary>${Object.entries(
       node.priority_parts,
     )
       .map(
         ([key, value]) =>
-          `<div class="contribution"><span>${escapeHtml(metricLabels[key] ?? key)}</span><meter min="0" max="0.25" value="${value}"></meter><span>${(value * 100).toFixed(1)} п.п.</span></div>`,
+          `<div class="contribution"><span>${escapeHtml(metricLabels[key] ?? key)}</span><meter aria-label="${escapeHtml(metricLabels[key] ?? key)}" min="0" max="${currentReport.rules.priority_weights[key] ?? 1}" value="${value}"></meter><span>${(value * 100).toFixed(1)} п.п.</span></div>`,
       )
       .join(
         "",
-      )}<p class="fine-print">Совпали: ${node.matched_rules.map((r) => escapeHtml(labels[r])).join(", ") || "конкретная роль не установлена"}. Поддержка не является вероятностью виновности.</p></details>${node.warnings.length ? `<div class="warning-box"><h3>Границы наблюдения</h3><ul>${node.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>` : ""}<details open><summary>Что проверить дальше</summary><ul class="check-list">${node.next_checks.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></details><details><summary>Временные признаки · ${node.temporal.active_days} дней</summary>${timeline(node)}</details><button id="investigate-node" class="button primary full-width">Пути, циклы и хронология ↗</button><button id="download-dossier" class="text-button">Скачать справку по узлу ↓</button><button id="focus-neighbors" class="button secondary">Показать окружение узла ↗</button><details open><summary>Входящие связи · ${node.in_deg}</summary>${links(node.incoming, true)}</details><details><summary>Исходящие связи · ${node.out_deg}</summary>${links(node.outgoing, false)}</details>`;
+      )}<p class="fine-print">Совпали: ${node.matched_rules.map((r) => escapeHtml(labels[r])).join(", ") || "конкретная роль не установлена"}. Поддержка не является вероятностью виновности.</p>${node.rule_trace.length ? `<div class="table-scroll"><table class="rule-trace"><caption>Поддержка сработавших правил</caption><thead><tr><th>Роль</th><th>До поправки</th><th>Наблюдаемость</th><th>Итог</th></tr></thead><tbody>${node.rule_trace.map((rule) => `<tr><td>${escapeHtml(labels[rule.role] ?? rule.role)}</td><td>${percent(rule.raw_support)}</td><td>×${number(rule.observation_multiplier)}</td><td>${percent(rule.support)}</td></tr>`).join("")}</tbody></table></div>` : ""}</details>${node.warnings.length ? `<div class="warning-box"><h3>Границы наблюдения</h3><ul>${node.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>` : ""}<details open><summary>Что проверить дальше</summary><ul class="check-list">${node.next_checks.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></details><details><summary>Временные признаки · ${node.temporal.active_days} дней</summary>${timeline(node)}</details><button id="focus-neighbors" class="button secondary">Показать окружение узла ↗</button><details open><summary>Входящие связи · ${node.in_deg}</summary>${links(node.incoming, true)}</details><details><summary>Исходящие связи · ${node.out_deg}</summary>${links(node.outgoing, false)}</details>`;
   onNodeButtons($("detail"));
   $("investigate-node").onclick = () => {
     void openInvestigation(runId, node, (gid) => selectNode(gid).catch(showError));
   };
   $("download-dossier").onclick = () => downloadDossier(node, currentReport);
   $("focus-neighbors").onclick = () => {
+    clearFilterControls();
     void loadGraph(gid).catch(showError);
   };
   $("node-cluster").onclick = () => {
@@ -306,6 +379,7 @@ async function selectNode(gid: string, focusGraph = true) {
     void loadGraph().catch(showError);
   };
   if (focusGraph || communityMode) await loadGraph(gid);
+  if (sequence !== detailSequence) return;
   cy?.elements().unselect();
   cy?.getElementById(gid).select();
   for (const button of $("top-list").querySelectorAll("button"))
@@ -372,7 +446,7 @@ $("search-form").onsubmit = (event) => {
 };
 for (const id of ["role", "cluster", "depth", "seeds"])
   $(id).onchange = () => {
-    currentGid = "";
+    clearSelection();
     switchTab(false);
     void loadGraph().catch(showError);
   };
@@ -412,19 +486,42 @@ $("upload-form").onsubmit = async (event) => {
 };
 
 async function init() {
+  const sequence = runSequence;
   const bootstrap = await api<{ run_id: string }>("/api/bootstrap");
-  const saved =
-    new URLSearchParams(location.search).get("run") ?? localStorage.getItem("money-graph-run");
+  if (sequence !== runSequence) return;
+  let saved = new URLSearchParams(location.search).get("run");
+  try {
+    saved ??= localStorage.getItem("money-graph-run");
+  } catch {
+    // A shareable run URL works independently of local browser storage.
+  }
   try {
     await loadRun(saved ?? bootstrap.run_id);
   } catch (error) {
-    if (saved && saved !== bootstrap.run_id) {
+    if (
+      saved &&
+      saved !== bootstrap.run_id &&
+      error instanceof ApiError &&
+      [404, 409].includes(error.status)
+    ) {
       await loadRun(bootstrap.run_id);
       alert("Сохранённый расчёт недоступен. Открыт начальный набор; можно загрузить файлы заново.");
     } else throw error;
   }
 }
-void init().catch(showError);
+function showInitialError(error: unknown) {
+  showError(error);
+  $("dataset-badge").textContent = "РАСЧЁТ НЕ ЗАГРУЖЕН";
+  $("metrics").innerHTML =
+    '<div class="metric"><span>Не удалось открыть выбранный расчёт</span><button id="retry-load" class="text-button">Повторить загрузку ↗</button></div>';
+  $("graph-count").textContent = "Расчёт не загружен";
+  $("retry-load").onclick = () => {
+    alert("");
+    $("retry-load").textContent = "Загрузка…";
+    void init().catch(showInitialError);
+  };
+}
+void init().catch(showInitialError);
 
 function renderMethod(report: Report) {
   const r = report.rules;
@@ -435,13 +532,22 @@ function renderMethod(report: Report) {
       .map(([k, w]) => `${percent(w)} ${metricLabels[k]}`)
       .join(
         " + ",
-      )}. Используются процентили положительных значений. Объём = max(вход, выход), изоляты получают приоритет 0.</p><p>Связующий узел: ≥${r.coordinator_min_seeds} seed-предков, ≥${r.coordinator_min_in} плательщиков, ≥${r.coordinator_min_out} получателей, процентиль посредничества ≥${r.coordinator_betweenness_percentile}. Распределитель: ≥${r.distributor_min_out} получателей. Объёмный транзит: выход/вход ${r.transit_ratio_min}–${r.transit_ratio_max}. Консолидатор: ≥${r.consolidator_min_in} плательщиков и выход/вход ≤${r.consolidator_ratio_max}. Конечный: положительный вход без наблюдаемого выхода.</p><p>Seed и граница depth=4 не получают роли по отношению потоков или отсутствию выхода. При пересечении правил порядок: связующий → распределитель → транзит → консолидатор → конечный → периферия. Поддержка роли — эвристика, не вероятность виновности.</p><p>Louvain: суммы обоих направлений, resolution=${r.louvain_resolution}, seed=${r.random_seed}. Изоляты сохранены. Номер сообщества не доказывает существование группы.</p><p>Сопоставление поступлений и списаний: FIFO с окном 1–2 календарных дня. Поступления одного дня не сопоставляются с его списаниями. Без времени суток и остатков нельзя доказать происхождение денег.</p>`;
+      )}. Используются процентили положительных значений. Объём = max(вход, выход), изоляты получают приоритет 0.</p><p>Связующий узел: ≥${r.coordinator_min_seeds} seed-предков, ≥${r.coordinator_min_in} плательщиков, ≥${r.coordinator_min_out} получателей, процентиль посредничества ≥${r.coordinator_betweenness_percentile}. Распределитель: ≥${r.distributor_min_out} получателей. Объёмный транзит: выход/вход ${r.transit_ratio_min}–${r.transit_ratio_max}. Консолидатор: ≥${r.consolidator_min_in} плательщиков и выход/вход ≤${r.consolidator_ratio_max}. Конечный: положительный вход без наблюдаемого выхода.</p><p>Seed и граница depth=4 не получают роли по отношению потоков или отсутствию выхода. При пересечении правил порядок: связующий → распределитель → транзит → консолидатор → конечный → периферия. Поддержка роли — эвристика, не вероятность виновности.</p><p>Посредничество: ${report.betweenness_method === "exact" ? "точный расчёт" : `оценка по ${report.betweenness_pivots} опорным узлам`} на направленном графе без весов расстояния. Самопереводы сохранены в обороте и графе, но исключены из признаков ролей, потоков между клиентами и хронологии.</p><p>Louvain: суммы обоих направлений, resolution=${r.louvain_resolution}, seed=${r.random_seed}. Изоляты сохранены. Номер сообщества не доказывает существование группы.</p><p>Сопоставление поступлений и списаний: FIFO с окном 1–2 календарных дня. Поступления одного дня не сопоставляются с его списаниями. Без времени суток и остатков нельзя доказать происхождение денег.</p>`;
 }
 async function showCommunityMap() {
+  clearSelection();
   const sequence = ++graphSequence;
-  const result = await api<CommunityGraph>(`/api/runs/${runId}/community-graph`);
-  if (sequence !== graphSequence) return;
   switchTab(false);
+  graphLoading("Загрузка сообществ…");
+  let result: CommunityGraph;
+  try {
+    result = await api<CommunityGraph>(`/api/runs/${runId}/community-graph`);
+  } catch (error) {
+    if (sequence === graphSequence) graphFailed(error);
+    return;
+  }
+  if (sequence !== graphSequence) return;
+  $("graph").setAttribute("aria-busy", "false");
   communityMode = true;
   updateLegend();
   $("edge-info").hidden = true;
