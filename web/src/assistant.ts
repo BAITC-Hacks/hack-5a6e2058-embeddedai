@@ -317,7 +317,9 @@ export class AnalystAssistant {
                 const match = /^\[gid:(-?\d+)\]$/.exec(part);
                 return match && known.has(match[1])
                   ? `<button class="text-button gid" data-assistant-gid="${escapeHtml(match[1])}">${escapeHtml(match[1])} ↗</button>`
-                  : escapeHtml(part);
+                  : escapeHtml(part)
+                      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+                      .replace(/`([^`\n]+)`/g, "<code>$1</code>");
               })
               .join("");
           const refs = (gids: string[]) =>

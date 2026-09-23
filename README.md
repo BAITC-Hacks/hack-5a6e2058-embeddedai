@@ -174,7 +174,7 @@ Bash-обёртки `scripts/start.sh` и `scripts/verify.sh` сохранены
 
 ![Синтетический пример: направленный граф и объяснение роли узла](docs/images/demo.png)
 
-[Посмотреть тёмную тему](docs/images/demo-dark.png) · [Пример AI-ответа](docs/images/assistant.png).
+[Посмотреть тёмную тему](docs/images/demo-dark.png) · [AI-аналитик над графом](docs/images/assistant.png).
 
 Основной сценарий: загрузите три файла → откройте TOP → объясните роль через
 факты → найдите произвольный `gid` → покажите связи/сообщество → скачайте CSV.
