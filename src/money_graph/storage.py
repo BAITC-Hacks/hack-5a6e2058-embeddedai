@@ -6,8 +6,8 @@ import os
 import re
 import shutil
 import tempfile
-import time
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -55,7 +55,13 @@ class ResultCache:
                 raise MissingRun from exc
             except OSError as exc:
                 raise CorruptRun from exc
-            fingerprint = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            fingerprint = (
+                stat.st_dev,
+                stat.st_ino,
+                stat.st_size,
+                stat.st_mtime_ns,
+                stat.st_ctime_ns,
+            )
             cached = self.entries.get(run_id)
             if cached is not None and cached[0] == fingerprint:
                 self.entries.move_to_end(run_id)
@@ -66,7 +72,13 @@ class ResultCache:
                 after = path.stat()
             except OSError as exc:
                 raise CorruptRun from exc
-            if fingerprint != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            if fingerprint != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            ):
                 raise CorruptRun
             # Avoid retaining an unusually large upload in addition to its active request.
             if stat.st_size <= 16 * 1024 * 1024:

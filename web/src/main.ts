@@ -1,6 +1,10 @@
-import cytoscape, { type Core } from "cytoscape";
+import type { Core, LayoutOptions, StylesheetStyle } from "cytoscape";
 import "./style.css";
 import { downloadDossier, openInvestigation, renderAnalysis, timeline } from "./analysis";
+import { AnalystAssistant } from "./assistant";
+import { cancelLayout, graphPositions } from "./layout";
+import type { LayoutRequest } from "./layout.worker";
+import { InvestigationQueue } from "./queue";
 import { graphPalette, initializeTheme } from "./theme";
 import type {
   Cluster,
@@ -33,6 +37,8 @@ let cy: Core | undefined;
 let graphSequence = 0;
 let detailSequence = 0;
 let currentGid = "";
+let activeTab = "graph";
+let assistant: AnalystAssistant | undefined;
 
 $("app").innerHTML = `
   <header class="header"><a class="brand" href="/" aria-label="На главную"><span class="brand-icon">◈</span><span>Граф денег<small>EMBEDDEDAI / FINANCIAL INTELLIGENCE</small></span></a>
@@ -54,9 +60,9 @@ $("app").innerHTML = `
       <button id="reset" class="text-button">Сбросить фильтры</button>
       <div class="panel-heading list-heading"><h2>Приоритет проверки</h2><span class="tag small">TOP 50</span></div><div id="top-list" class="top-list"></div>
     </aside>
-    <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button></div><div><button id="fit" class="icon-button" title="Вместить граф" disabled>⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
+    <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button><button id="tab-queue" class="tab">Очередь</button><button id="tab-assistant" class="tab">AI-ассистент</button></div><div><button id="fit" class="icon-button" title="Вместить граф" disabled>⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
       <div class="graph-options"><button id="community-map" class="text-button">Обзор сообществ</button><label for="color-mode">Цвет</label><select id="color-mode"><option value="role">По роли</option><option value="cluster">По сообществу</option></select><button id="graph-png" class="text-button" disabled>PNG ↓</button></div><div id="edge-info" class="edge-info" hidden></div><div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count" role="status">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
-      <div id="clusters-view" hidden></div><div id="analysis-view" hidden></div>
+      <div id="clusters-view" hidden></div><div id="analysis-view" hidden></div><div id="queue-view" hidden></div><div id="assistant-view" hidden></div>
       <div id="graph-legend" class="legend">${Object.entries(labels)
         .map(([key, label]) => `<span><i style="background:${colors[key]}"></i>${label}</span>`)
         .join("")}<span class="legend-note">◆ seed · пунктир — граница наблюдения</span></div>
@@ -67,6 +73,16 @@ $("app").innerHTML = `
   <dialog id="method-dialog" aria-labelledby="method-title"><div class="dialog-title"><h2 id="method-title">Объяснимый расчёт</h2><button id="method-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="method-content"></div></dialog>
   <dialog id="investigation-dialog" class="wide-dialog" aria-labelledby="investigation-title"><div class="dialog-title"><h2 id="investigation-title">Доказательная карточка</h2><button id="investigation-close" class="icon-button" aria-label="Закрыть">×</button></div><div id="investigation-content"></div></dialog>`;
 
+const queue = new InvestigationQueue(
+  currentFilters,
+  (gid) => selectNode(gid, false, true).catch(showError),
+  () => assistant?.updateContext(),
+);
+assistant = new AnalystAssistant(
+  () => (queue.selectedGids().length ? queue.selectedGids() : currentGid ? [currentGid] : []),
+  (gid) => selectNode(gid).catch(showError),
+);
+$("queue-ask").onclick = () => activateTab("assistant");
 const emptyDetail = $("detail").innerHTML;
 initializeTheme($<HTMLSelectElement>("theme-select"), () => {
   cy?.style(graphStyles(communityMode));
@@ -98,6 +114,9 @@ function showError(error: unknown) {
 
 async function loadRun(id: string) {
   const sequence = ++runSequence;
+  queue.reset();
+  assistant?.reset();
+  cancelLayout();
   clearSelection();
   ++graphSequence;
   const [report, top, clusters] = await Promise.all([
@@ -153,22 +172,27 @@ async function loadRun(id: string) {
     button.onclick = () => {
       $<HTMLSelectElement>("cluster").value = button.dataset.cluster ?? "";
       resetOtherFilters("cluster");
+      queue.refresh();
       switchTab(false);
       void loadGraph().catch(showError);
     };
   }
   alert("");
   resetOtherFilters();
-  const selection = detailSequence;
-  await loadGraph().catch(showError);
-  if (sequence !== runSequence || selection !== detailSequence) return;
+  queue.setRun(id);
+  assistant?.setRun(id);
   const first = top[0];
-  if (first) await selectNode(first.gid, false).catch(showError);
+  // Independent requests let the factual card appear while the worker arranges the map.
+  await Promise.all([
+    loadGraph().catch(showError),
+    first ? selectNode(first.gid, false, true).catch(showError) : Promise.resolve(),
+  ]);
 }
 
 function clearSelection() {
   ++detailSequence;
   currentGid = "";
+  assistant?.updateContext();
   $("detail").innerHTML = emptyDetail;
   $("detail").setAttribute("aria-busy", "false");
   $<HTMLInputElement>("gid").value = "";
@@ -194,6 +218,7 @@ function setGraphActionsEnabled(enabled: boolean) {
 }
 
 function graphLoading(message: string) {
+  cancelLayout();
   setGraphActionsEnabled(false);
   alert("");
   $("graph").setAttribute("aria-busy", "true");
@@ -213,7 +238,7 @@ function graphFailed(error: unknown) {
   showError(error);
 }
 
-function graphStyles(communities: boolean): cytoscape.StylesheetStyle[] {
+function graphStyles(communities: boolean): StylesheetStyle[] {
   const palette = graphPalette();
   return [
     {
@@ -271,20 +296,36 @@ function graphStyles(communities: boolean): cytoscape.StylesheetStyle[] {
   ];
 }
 
+function currentFilters(): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const field of ["role", "cluster", "depth"]) {
+    const value = $<HTMLSelectElement>(field).value;
+    if (value) params.set(field, value);
+  }
+  if ($<HTMLInputElement>("seeds").checked) params.set("seeds", "true");
+  return params;
+}
+async function prepareGraph(data: LayoutRequest, sequence: number) {
+  try {
+    return await Promise.all([graphPositions(data), import("cytoscape")]);
+  } catch {
+    if (sequence === graphSequence) {
+      cancelLayout();
+      graphFailed(
+        new Error("Не удалось загрузить модуль карты. Проверьте соединение и обновите страницу."),
+      );
+    }
+    return null;
+  }
+}
 async function loadGraph(gid?: string, full = false) {
   const sequence = ++graphSequence;
   communityMode = false;
   updateLegend();
   $("edge-info").hidden = true;
-  const params = new URLSearchParams({ limit: full ? "10000" : "350" });
+  const params = gid ? new URLSearchParams() : currentFilters();
+  params.set("limit", full ? "10000" : "350");
   if (gid) params.set("gid", gid);
-  else {
-    for (const field of ["role", "cluster", "depth"]) {
-      const value = $<HTMLSelectElement>(field).value;
-      if (value) params.set(field, value);
-    }
-    if ($<HTMLInputElement>("seeds").checked) params.set("seeds", "true");
-  }
   graphLoading("Загрузка связей…");
   let result: GraphResponse;
   try {
@@ -294,9 +335,20 @@ async function loadGraph(gid?: string, full = false) {
     return;
   }
   if (sequence !== graphSequence) return;
+  $("graph-count").textContent = "Раскладываем граф в фоне…";
+  $("graph-empty").textContent = "Раскладываем граф в фоне…";
+  const prepared = await prepareGraph(
+    {
+      nodes: result.nodes.map((node) => ({ id: node.gid, size: 13 + node.priority_score * 20 })),
+      edges: result.edges.map((edge) => ({ source: edge.src, target: edge.dst })),
+    },
+    sequence,
+  );
+  if (!prepared || sequence !== graphSequence) return;
+  const [layout, { default: cytoscape }] = prepared;
   $("graph").setAttribute("aria-busy", "false");
   $("graph-count").textContent =
-    `${number(result.shown)} из ${number(result.matched)} подходящих · всего ${number(result.total)}`;
+    `${number(result.shown)} из ${number(result.matched)} подходящих · всего ${number(result.total)}${layout.error ? " · раскладка сеткой" : ""}`;
   $("graph-empty").hidden = result.shown > 0;
   $("graph-empty").textContent = "По этим фильтрам узлов нет";
   cy?.destroy();
@@ -323,13 +375,11 @@ async function loadGraph(gid?: string, full = false) {
     wheelSensitivity: 0.25,
     style: graphStyles(false),
     layout: {
-      name: result.shown > 500 ? "grid" : "cose",
+      name: layout.positions ? "preset" : "grid",
+      positions: layout.positions,
       animate: false,
-      randomize: false,
       padding: 35,
-      nodeRepulsion: () => 16000,
-      idealEdgeLength: () => 75,
-    } as cytoscape.LayoutOptions,
+    } as LayoutOptions,
   });
   cy.on("tap", "edge", (event) => {
     const e = event.target.data();
@@ -359,12 +409,13 @@ function profileHtml(node: NodeDetail): string {
   return `<details id="node-profile" ${profile.signals.length ? "open" : ""}><summary>Профиль относительно колена · ${profile.signals.length} сигналов</summary><p>Колено ${profile.cohort_depth}: ${profile.cohort_size} активных узлов; минимум для сравнения — ${profile.minimum_cohort_size}. Верхняя граница: Q3 + 3 × (Q3 − Q1).</p>${profile.signals.length ? `<ul>${profile.signals.map((signal) => `<li>${escapeHtml(signal.text)}</li>`).join("")}</ul>` : ""}<p class="fine-print">${escapeHtml(profile.caveat)}</p></details>`;
 }
 
-async function selectNode(gid: string, focusGraph = true) {
+async function selectNode(gid: string, focusGraph = true, preserveTab = false) {
   if (!gid) return;
   const sequence = ++detailSequence;
   if (focusGraph) {
     ++graphSequence;
     clearFilterControls();
+    queue.refresh();
     graphLoading("Поиск узла…");
   }
   alert("");
@@ -386,8 +437,9 @@ async function selectNode(gid: string, focusGraph = true) {
   if (sequence !== detailSequence) return;
   $("detail").setAttribute("aria-busy", "false");
   currentGid = gid;
+  assistant?.updateContext();
   $<HTMLInputElement>("gid").value = node.gid;
-  switchTab(false);
+  if (!preserveTab) switchTab(false);
   $("detail").innerHTML =
     `<div class="panel-heading"><h2>Карточка узла</h2><span class="tag small">#${node.rank}</span></div><p class="node-id gid">${node.gid}</p>${roleTag(node.role)}<div class="node-tags"><span>Уровень ${node.depth}</span><button id="node-cluster" class="text-button">Сообщество #${node.cluster_id} ↗</button>${node.is_seed ? '<span class="tag small">SEED</span>' : ""}</div><div class="score-grid"><div><strong>${percent(node.priority_score)}</strong><span>Приоритет проверки</span></div><div><strong>${percent(node.role_score)}</strong><span>Поддержка правила</span></div></div><p class="fine-print">Место при изменении весов ±20%: ${node.rank_range[0]}–${node.rank_range[1]}. Не доверительный интервал.</p><h3>Почему эта роль</h3><p class="evidence">${escapeHtml(node.evidence)}</p><button id="investigate-node" class="button primary full-width">Пути, циклы и хронология ↗</button><button id="download-dossier" class="text-button">Скачать справку по узлу ↓</button><dl class="node-metrics"><div><dt>Вход от других клиентов</dt><dd>${money(node.in_kzt)}</dd></div><div><dt>Выход другим клиентам</dt><dd>${money(node.out_kzt)}</dd></div><div><dt>Плательщики / получатели</dt><dd>${node.in_deg} / ${node.out_deg}</dd></div><div><dt>Переводы: вход / выход</dt><dd>${node.in_tx} / ${node.out_tx}</dd></div><div><dt>Seed-предков</dt><dd>${node.seed_reach}</dd></div>${node.self_transfer_tx ? `<div><dt>Самопереводы отдельно</dt><dd>${money(node.self_transfer_kzt)} · ${node.self_transfer_tx} пер.</dd></div>` : ""}</dl><details><summary>Вклад в приоритет и правила</summary>${Object.entries(
       node.priority_parts,
@@ -406,11 +458,14 @@ async function selectNode(gid: string, focusGraph = true) {
   $("download-dossier").onclick = () => downloadDossier(node, currentReport);
   $("focus-neighbors").onclick = () => {
     clearFilterControls();
+    queue.refresh();
     void loadGraph(gid).catch(showError);
   };
   $("node-cluster").onclick = () => {
     resetOtherFilters();
     $<HTMLSelectElement>("cluster").value = String(node.cluster_id);
+    queue.refresh();
+    switchTab(false);
     void loadGraph().catch(showError);
   };
   if (focusGraph || communityMode) await loadGraph(gid);
@@ -420,24 +475,22 @@ async function selectNode(gid: string, focusGraph = true) {
   for (const button of $("top-list").querySelectorAll("button"))
     button.classList.toggle("selected", (button as HTMLElement).dataset.gid === gid);
 }
+function activateTab(tab: string) {
+  activeTab = tab;
+  for (const name of ["graph", "clusters", "analysis", "queue", "assistant"]) {
+    $(name === "graph" ? "graph-wrapper" : `${name}-view`).hidden = name !== tab;
+    $(`tab-${name}`).classList.toggle("active", name === tab);
+  }
+  if (tab === "graph") cy?.resize();
+  if (tab === "assistant") assistant?.updateContext();
+}
 function switchTab(clusters: boolean) {
-  $("analysis-view").hidden = true;
-  $("tab-analysis").classList.remove("active");
-  $("graph-wrapper").hidden = clusters;
-  $("clusters-view").hidden = !clusters;
-  $("tab-graph").classList.toggle("active", !clusters);
-  $("tab-clusters").classList.toggle("active", clusters);
-  if (!clusters) cy?.resize();
+  activateTab(clusters ? "clusters" : "graph");
 }
 $("investigation-close").onclick = () => $<HTMLDialogElement>("investigation-dialog").close();
-$("tab-analysis").onclick = () => {
-  $("graph-wrapper").hidden = true;
-  $("clusters-view").hidden = true;
-  $("analysis-view").hidden = false;
-  $("tab-graph").classList.remove("active");
-  $("tab-clusters").classList.remove("active");
-  $("tab-analysis").classList.add("active");
-};
+$("tab-analysis").onclick = () => activateTab("analysis");
+$("tab-queue").onclick = () => activateTab("queue");
+$("tab-assistant").onclick = () => activateTab("assistant");
 $("tab-graph").onclick = () => switchTab(false);
 $("tab-clusters").onclick = () => switchTab(true);
 $("community-map").onclick = () => {
@@ -472,11 +525,13 @@ $("graph-png").onclick = () => {
 $("fit").onclick = () => cy?.fit(undefined, 35);
 $("full-graph").onclick = () => {
   resetOtherFilters();
+  queue.refresh();
   switchTab(false);
   void loadGraph(undefined, true).catch(showError);
 };
 $("reset").onclick = () => {
   resetOtherFilters();
+  queue.refresh();
   $<HTMLInputElement>("gid").value = "";
   switchTab(false);
   void loadGraph().catch(showError);
@@ -488,7 +543,8 @@ $("search-form").onsubmit = (event) => {
 for (const id of ["role", "cluster", "depth", "seeds"])
   $(id).onchange = () => {
     clearSelection();
-    switchTab(false);
+    queue.refresh();
+    if (activeTab !== "queue") switchTab(false);
     void loadGraph().catch(showError);
   };
 $("export-select").onchange = () => {
@@ -588,6 +644,18 @@ async function showCommunityMap() {
     return;
   }
   if (sequence !== graphSequence) return;
+  const prepared = await prepareGraph(
+    {
+      nodes: result.nodes.map((node) => ({
+        id: `c${node.cluster_id}`,
+        size: 18 + Math.sqrt(node.n_nodes) * 3,
+      })),
+      edges: result.edges.map((edge) => ({ source: `c${edge.src}`, target: `c${edge.dst}` })),
+    },
+    sequence,
+  );
+  if (!prepared || sequence !== graphSequence) return;
+  const [layout, { default: cytoscape }] = prepared;
   $("graph").setAttribute("aria-busy", "false");
   communityMode = true;
   updateLegend();
@@ -612,11 +680,17 @@ async function showCommunityMap() {
       })),
     ],
     style: graphStyles(true),
-    layout: { name: "cose", animate: false, randomize: false, padding: 35 },
+    layout: {
+      name: layout.positions ? "preset" : "grid",
+      positions: layout.positions,
+      animate: false,
+      padding: 35,
+    } as LayoutOptions,
   });
   cy.on("tap", "node", (event) => {
     resetOtherFilters();
     $<HTMLSelectElement>("cluster").value = String(event.target.data("cid"));
+    queue.refresh();
     void loadGraph().catch(showError);
   });
   cy.on("tap", "edge", (event) => {

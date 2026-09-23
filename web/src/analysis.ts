@@ -1,3 +1,4 @@
+import { appendRobustness } from "./robustness";
 import type { Investigation, NodeDetail, PathEvidence, Report, Resilience } from "./types";
 import { $, api, download, escapeHtml, labels, metricLabels, money, number, percent } from "./ui";
 
@@ -78,6 +79,7 @@ export function renderAnalysis(
   const s = report.sensitivity;
   $("analysis-view").innerHTML =
     `<div class="analysis-block"><p class="eyebrow">ПРОВЕРКА ГИПОТЕЗ</p><h2>Насколько устойчив наш приоритет?</h2><p>Каждый вес по очереди изменяется на ±20%, затем веса нормируются. Совпадение TOP ${s.top_n} с исходным списком — от <strong>${percent(s.minimum_top_overlap)}</strong>.</p><div class="sensitivity-grid">${s.scenarios.map((x) => `<div><span>${metricLabels[x.metric]} ${x.multiplier < 1 ? "−" : "+"}20%</span><strong>${percent(x.top_overlap)}</strong></div>`).join("")}</div><p class="fine-print">${escapeHtml(s.caveat)} Диапазон позиции конкретного узла показан в его карточке.</p></div><div class="analysis-block"><h2>Что изменится без ключевых узлов?</h2><p>Сравните приоритет с числом связей и случайным выбором. Анализируются оставшиеся вершины, без искусственного эффекта от уменьшения их количества.</p><form id="resilience-form" class="simulation-form"><label for="remove-count">Число узлов</label><select id="remove-count">${[1, 3, 5, 10, 20].map((n) => `<option value="${n}" ${n === 5 ? "selected" : ""}>${n}</option>`).join("")}</select><button id="simulate" class="button primary">Смоделировать</button></form><div id="resilience-result" aria-live="polite"></div></div><div class="analysis-block"><h2>Границы исходных данных</h2><p>${report.n_connected_components} компонент с ≥2 узлами и ${report.n_isolates} изолятов. ${report.n_boundary} узлов обрезаны глубиной обхода.</p><ul>${report.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul><p class="fine-print">Финансовый объём — max(наблюдаемый вход, наблюдаемый выход). Он входит в приоритет как отдельный процентиль, но не является остатком на счёте.</p></div>`;
+  appendRobustness(run, select);
   $("resilience-form").onsubmit = async (event) => {
     event.preventDefault();
     const button = $<HTMLButtonElement>("simulate");

@@ -20,6 +20,7 @@ from . import clusters as cluster_analysis
 from .exports import export_manifest
 from .investigation import sensitivity
 from .loader import FILES, DataError, load
+from .offline_report import render_report
 from .roles import LABELS, classify
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -655,6 +656,7 @@ def write_result(result: dict[str, Any], out_dir: Path) -> None:
                 json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
                 encoding="utf-8",
             )
+        (staging / "report.html").write_text(render_report(result), encoding="utf-8")
         # A serialization error must never replace a previously valid generation.
         export_manifest(result, staging)
         if backup.exists():

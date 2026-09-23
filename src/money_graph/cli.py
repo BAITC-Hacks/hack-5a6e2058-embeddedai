@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -27,7 +28,7 @@ def output_directory(path: Path, sources: tuple[Path, ...] = (), *, demo: bool =
         if not resolved.is_dir():
             raise DataError("Путь результата уже занят файлом; укажите отдельную папку")
         entries = list(resolved.iterdir())
-        allowed = set() if demo else {*EXPORTS, "run_report.json", "result.json"}
+        allowed = set() if demo else {*EXPORTS, "run_report.json", "result.json", "report.html"}
         if any(entry.name not in allowed or not entry.is_file() for entry in entries):
             raise DataError(
                 "Папка результата содержит посторонние файлы. Укажите новую или пустую папку"
@@ -113,6 +114,10 @@ def main(argv: list[str] | None = None, *, analyze_only: bool = False) -> None:
                 "status": "success",
                 "output_dir": str(args.out.resolve()),
                 "exports": exports,
+                "report_html": {
+                    "path": str((args.out / "report.html").resolve()),
+                    "sha256": hashlib.sha256((args.out / "report.html").read_bytes()).hexdigest(),
+                },
                 "total_runtime_seconds": round(time.perf_counter() - started, 3),
             }
             print(json.dumps(response, ensure_ascii=False, allow_nan=False, indent=2))

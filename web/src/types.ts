@@ -225,7 +225,7 @@ export interface Robustness {
     n_nodes: number;
     n_active_nodes: number;
     scenario_count: number;
-    minimum_unchanged_fraction: number;
+    minimum_unchanged_fraction: number | null;
     scenarios: {
       id: string;
       label: string;

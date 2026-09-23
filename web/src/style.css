@@ -159,6 +159,23 @@ select {
 select {
   width: 100%;
 }
+.workspace-intro h2 {
+  font-size: 18px;
+  margin: 6px 0;
+}
+.queue-results small {
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.assistant-node span {
+  margin-left: 10px;
+  color: var(--text-muted);
+}
+.robustness-node small {
+  display: block;
+  color: var(--text-muted);
+  margin: 5px 0;
+}
 .header {
   height: 82px;
   padding: 0 34px;
@@ -1234,4 +1251,187 @@ input::file-selector-button {
     width: 100%;
     justify-content: center;
   }
+}
+
+/* Investigation and assistant are full workspace views, using the same theme tokens. */
+#queue-view,
+#assistant-view {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  flex: 1;
+  padding: 18px;
+  background: var(--surface);
+  line-height: 1.6;
+}
+.workspace-intro p,
+#assistant-status {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.queue-controls {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(120px, 1fr) minmax(95px, 0.8fr);
+  gap: 10px;
+  margin: 18px 0 10px;
+}
+.queue-controls input {
+  display: block;
+  width: 100%;
+}
+.queue-selection,
+.queue-pagination,
+.assistant-actions,
+.assistant-examples {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 12px 0;
+}
+.queue-selection > span,
+.queue-pagination > span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.queue-pagination {
+  justify-content: space-between;
+}
+.queue-results {
+  min-width: 690px;
+}
+.queue-results th {
+  white-space: normal;
+}
+.queue-results td {
+  font-size: 10px;
+  vertical-align: top;
+}
+.queue-results td:nth-child(2) span,
+.queue-results td:nth-child(3) span,
+.queue-results td small {
+  display: block;
+}
+.queue-results td:nth-child(2) .gid {
+  display: block;
+  margin: 3px 0;
+}
+.queue-results td:nth-child(4) {
+  min-width: 160px;
+  max-width: 210px;
+  line-height: 1.6;
+}
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 9px;
+  resize: vertical;
+}
+textarea:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.queue-results textarea {
+  width: 130px;
+  min-height: 64px;
+}
+.queue-empty {
+  padding: 20px;
+  color: var(--text-muted);
+}
+.assistant-disclosure {
+  margin: 16px 0;
+}
+#assistant-question {
+  width: 100%;
+  min-height: 90px;
+}
+#assistant-context {
+  overflow-wrap: anywhere;
+}
+#assistant-token {
+  width: min(100%, 330px);
+}
+.assistant-answer {
+  border-top: 1px solid var(--border);
+  margin-top: 22px;
+}
+.assistant-answer p {
+  overflow-wrap: anywhere;
+}
+.assistant-question-echo {
+  color: var(--text-muted);
+  font-size: 11px;
+  border-left: 3px solid var(--accent-line);
+  padding-left: 10px;
+}
+.assistant-answer-text {
+  white-space: pre-wrap;
+}
+.assistant-claims {
+  padding-left: 20px;
+}
+.assistant-claims li {
+  margin: 12px 0;
+}
+.assistant-node,
+.robustness-node {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 9px 0;
+  font-size: 11px;
+}
+.assistant-node p {
+  color: var(--text-muted);
+  margin: 5px 0;
+}
+.graph-toolbar {
+  height: auto;
+  min-height: 53px;
+  flex-wrap: wrap;
+}
+.graph-toolbar .tabs {
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+@media (max-width: 650px) {
+  .graph-toolbar {
+    padding: 0 10px 8px;
+    gap: 0 8px;
+  }
+  .graph-toolbar .tabs {
+    gap: 9px;
+  }
+  .graph-toolbar .tab {
+    font-size: 11px;
+    height: 43px;
+  }
+  .queue-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+  .queue-controls label:first-child {
+    grid-column: 1 / -1;
+  }
+  #queue-view,
+  #assistant-view {
+    padding: 12px;
+  }
+}
+.queue-selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 100px;
+  overflow: auto;
+}
+.selection-chip {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 10px;
 }

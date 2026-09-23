@@ -77,8 +77,8 @@ def role_scenarios(rules: dict[str, Any]) -> list[dict[str, Any]]:
         width = half_width * multiplier
         if half_width == 0 and name == "wide":
             width = min(0.05, center / 2)
-        lower = round(max(min(low, 1e-8), center - width), 8)
-        upper = round(center + width, 8)
+        lower = max(min(low, 1e-8), center - width)
+        upper = center + width
         add(
             f"transit_band_{name}",
             f"Транзит: интервал выход/вход → [{lower:.0%}; {upper:.0%}]",
@@ -93,12 +93,15 @@ def role_scenarios(rules: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _roles(nodes: list[dict[str, Any]], rules: dict[str, Any]) -> dict[str, Any]:
     # Saved JSON uses null for an unobserved denominator, classify uses NaN.
-    rows = [dict(row, pass_through=row["pass_through"] or math.nan) for row in nodes]
-    for original, row in zip(nodes, rows, strict=True):
-        if original["pass_through"] == 0:
-            row["pass_through"] = 0.0
+    rows = [
+        dict(row, pass_through=math.nan if row["pass_through"] is None else row["pass_through"])
+        for row in nodes
+    ]
+    for row in rows:
         if classify(row, rules)["role"] != row["role"]:
-            raise DataError("Сохранённые роли не соответствуют правилам; пересчитайте исходный набор")
+            raise DataError(
+                "Сохранённые роли не соответствуют правилам; пересчитайте исходный набор"
+            )
     active = [row["in_deg"] + row["out_deg"] > 0 for row in rows]
     n_active = sum(active)
     alternatives: list[Counter[str]] = [Counter() for _ in rows]
@@ -138,7 +141,9 @@ def _roles(nodes: list[dict[str, Any]], rules: dict[str, Any]) -> dict[str, Any]
             ],
             "changed_scenarios": identifiers,
         }
-        for row, assessed, counts, identifiers in zip(rows, active, alternatives, changed, strict=True)
+        for row, assessed, counts, identifiers in zip(
+            rows, active, alternatives, changed, strict=True
+        )
     ]
     by_gid = {row["gid"]: row for row in details}
     return {
@@ -146,7 +151,11 @@ def _roles(nodes: list[dict[str, Any]], rules: dict[str, Any]) -> dict[str, Any]
         "n_active_nodes": n_active,
         "scenario_count": len(scenarios),
         "minimum_unchanged_fraction": min(
-            (row["unchanged_fraction"] for row in scenarios if row["unchanged_fraction"] is not None),
+            (
+                row["unchanged_fraction"]
+                for row in scenarios
+                if row["unchanged_fraction"] is not None
+            ),
             default=None,
         ),
         "scenarios": scenarios,
@@ -161,8 +170,7 @@ def _communities(result: dict[str, Any], rules: dict[str, Any]) -> dict[str, Any
     directed: nx.DiGraph = nx.DiGraph()
     directed.add_nodes_from(int(row["gid"]) for row in nodes)
     directed.add_edges_from(
-        (int(row["src"]), int(row["dst"]), {"sum_kzt": row["sum_kzt"]})
-        for row in result["edges"]
+        (int(row["src"]), int(row["dst"]), {"sum_kzt": row["sum_kzt"]}) for row in result["edges"]
     )
     graph = projection(directed)
     active = [gid for gid, degree in graph.degree() if degree]
@@ -211,7 +219,9 @@ def _communities(result: dict[str, Any], rules: dict[str, Any]) -> dict[str, Any
                 "id": f"louvain_{candidate}_{resolution:g}",
                 "seed": candidate,
                 "resolution": resolution,
-                "kind": "seed" if resolution == base_resolution else "resolution_and_seed",
+                "kind": "seed"
+                if resolution == base_resolution
+                else ("resolution" if candidate == seed else "resolution_and_seed"),
                 "n_communities": len(groups),
                 "adjusted_rand": adjusted_rand(baseline_labels, labels),
             }

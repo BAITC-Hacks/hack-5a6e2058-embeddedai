@@ -9,6 +9,7 @@ Group=moneygraph
 WorkingDirectory=/opt/money-graph
 Environment=MONEY_GRAPH_STORAGE=/var/lib/money-graph/runs
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/money-graph/assistant.env
 ExecStart=/opt/money-graph/.venv/bin/money-graph serve --host 127.0.0.1 --port 3000
 Restart=on-failure
 RestartSec=3
