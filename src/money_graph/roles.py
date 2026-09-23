@@ -1,11 +1,15 @@
 """Versioned heuristic evidence, not a probability of criminal involvement."""
+
 import math
 from typing import Any
 
 LABELS = {
-    "coordinator": "Связующий узел", "distributor": "Распределитель",
-    "transit": "Транзит", "consolidator": "Консолидатор",
-    "terminal": "Конечный в выборке", "peripheral": "Периферия / мало данных",
+    "coordinator": "Связующий узел",
+    "distributor": "Распределитель",
+    "transit": "Транзит",
+    "consolidator": "Консолидатор",
+    "terminal": "Конечный в выборке",
+    "peripheral": "Периферия / мало данных",
 }
 
 
@@ -17,23 +21,42 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     ratio = row["pass_through"]
     observed = not row["is_seed"] and not row["boundary_censored"] and math.isfinite(ratio)
     candidates: dict[str, float] = {}
-    if (row["seed_reach"] >= cfg["coordinator_min_seeds"]
+    if (
+        row["seed_reach"] >= cfg["coordinator_min_seeds"]
         and row["in_deg"] >= cfg["coordinator_min_in"]
         and row["out_deg"] >= cfg["coordinator_min_out"]
-        and row["p_betweenness"] >= cfg["coordinator_betweenness_percentile"]):
-        candidates["coordinator"] = (.35 * support(row["seed_reach"], 4)
-            + .30 * row["p_betweenness"] + .20 * support(row["in_deg"], 6)
-            + .15 * support(row["out_deg"], 5))
+        and row["p_betweenness"] >= cfg["coordinator_betweenness_percentile"]
+    ):
+        candidates["coordinator"] = (
+            0.35 * support(row["seed_reach"], 4)
+            + 0.30 * row["p_betweenness"]
+            + 0.20 * support(row["in_deg"], 6)
+            + 0.15 * support(row["out_deg"], 5)
+        )
     if row["out_deg"] >= cfg["distributor_min_out"] and row["out_tx"] >= cfg["distributor_min_out"]:
-        candidates["distributor"] = (.60 * support(row["out_deg"], 20)
-            + .25 * row["p_out_tx"] + .15 * row["p_out_kzt"])
-    if observed and row["out_deg"] > 0 and cfg["transit_ratio_min"] <= ratio <= cfg["transit_ratio_max"]:
-        candidates["transit"] = (1 - abs(ratio - 1) / .4) * (.5 + .5 * support(min(row["in_tx"], row["out_tx"]), 3))
-    if observed and row["in_deg"] >= cfg["consolidator_min_in"] and ratio <= cfg["consolidator_ratio_max"]:
-        candidates["consolidator"] = (.50 * support(row["in_deg"], 6)
-            + .30 * (1 - min(ratio / cfg["consolidator_ratio_max"], 1)) + .20 * row["p_in_tx"])
+        candidates["distributor"] = (
+            0.60 * support(row["out_deg"], 20) + 0.25 * row["p_out_tx"] + 0.15 * row["p_out_kzt"]
+        )
+    if (
+        observed
+        and row["out_deg"] > 0
+        and cfg["transit_ratio_min"] <= ratio <= cfg["transit_ratio_max"]
+    ):
+        candidates["transit"] = (1 - abs(ratio - 1) / 0.4) * (
+            0.5 + 0.5 * support(min(row["in_tx"], row["out_tx"]), 3)
+        )
+    if (
+        observed
+        and row["in_deg"] >= cfg["consolidator_min_in"]
+        and ratio <= cfg["consolidator_ratio_max"]
+    ):
+        candidates["consolidator"] = (
+            0.50 * support(row["in_deg"], 6)
+            + 0.30 * (1 - min(ratio / cfg["consolidator_ratio_max"], 1))
+            + 0.20 * row["p_in_tx"]
+        )
     if observed and row["in_kzt"] > 0 and row["out_deg"] == 0:
-        candidates["terminal"] = .50 + .30 * row["p_in_tx"] + .20 * support(row["in_deg"], 3)
+        candidates["terminal"] = 0.50 + 0.30 * row["p_in_tx"] + 0.20 * support(row["in_deg"], 3)
     role = next(iter(candidates), "peripheral")
     score = candidates.get(role, 0.0)
     if row["is_seed"] or row["boundary_censored"]:
@@ -42,7 +65,9 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     if row["boundary_censored"]:
         warnings.append("Граница 4-го уровня: дальнейшие переводы не наблюдаются")
     if row["is_seed"]:
-        warnings.append("Seed: входящие извне выборки не видны; отношение потоков не доказывает роль")
+        warnings.append(
+            "Seed: входящие извне выборки не видны; отношение потоков не доказывает роль"
+        )
     if row["isolated"]:
         warnings.append("Узел включён в исходный список, но не имеет наблюдаемых рёбер")
     if row["observed_out_exceeds_in"]:
@@ -57,5 +82,10 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         evidence += " Нет рёбер: недостаточно наблюдений."
     elif row["is_seed"]:
         evidence += " Seed: вход неполный."
-    return {"role": role, "role_score": round(max(0, min(score, 1)), 6),
-            "matched_rules": list(candidates), "evidence": evidence[:200], "warnings": warnings}
+    return {
+        "role": role,
+        "role_score": round(max(0, min(score, 1)), 6),
+        "matched_rules": list(candidates),
+        "evidence": evidence[:200],
+        "warnings": warnings,
+    }

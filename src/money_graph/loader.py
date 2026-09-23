@@ -1,4 +1,5 @@
 """Read the organizer schema without converting identifiers through float."""
+
 from pathlib import Path
 
 import numpy as np
@@ -28,13 +29,18 @@ def load(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             meta = pq.read_metadata(path)
             if meta.num_rows > LIMITS[name]:
                 raise DataError(f"{name}: превышен предел {LIMITS[name]} строк для демо")
-            if sum(meta.row_group(i).total_byte_size for i in range(meta.num_row_groups)) > 128_000_000:
+            if (
+                sum(meta.row_group(i).total_byte_size for i in range(meta.num_row_groups))
+                > 128_000_000
+            ):
                 raise DataError(f"{name}: распакованный файл превышает 128 МБ")
             tables[name] = pd.read_parquet(path)
         except DataError:
             raise
         except Exception as exc:
-            raise DataError(f"Не удалось прочитать {name}.parquet: проверьте формат Parquet") from exc
+            raise DataError(
+                f"Не удалось прочитать {name}.parquet: проверьте формат Parquet"
+            ) from exc
     nodes, edges, tx = (tables[name] for name in FILES)
     validate(nodes, edges, tx)
     return (

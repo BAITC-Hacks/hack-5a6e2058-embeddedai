@@ -1,0 +1,23 @@
+[Unit]
+Description=Money Graph analytics
+After=network.target
+
+[Service]
+Type=simple
+User=moneygraph
+Group=moneygraph
+WorkingDirectory=/opt/money-graph
+Environment=MONEY_GRAPH_STORAGE=/var/lib/money-graph/runs
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/money-graph/.venv/bin/money-graph serve --host 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/money-graph
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
