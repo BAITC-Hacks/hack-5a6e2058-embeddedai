@@ -42,6 +42,8 @@ SUMMARY_KEYS = (
     "is_seed",
     "in_deg",
     "out_deg",
+    "in_tx",
+    "out_tx",
     "in_kzt",
     "out_kzt",
     "volume",

@@ -8,6 +8,12 @@ interface AssistantStatus {
   access_required?: boolean;
 }
 const operations: Record<string, string> = {
+  inspect_graph: "Обзор данных и методики",
+  find_nodes: "Поиск и сравнение узлов",
+  inspect_nodes: "Изучение выбранных узлов",
+  trace_flows: "Проверка путей переводов",
+  inspect_community: "Изучение сообщества",
+  assess_removal: "Изменение связности при удалении узлов",
   node_summary: "Профиль узлов",
   rank_nodes: "Ранжирование узлов",
   common_recipients: "Общие получатели",
@@ -28,7 +34,7 @@ function queryHtml(raw: unknown, refs: (gids: string[]) => string): string {
     return `<details class="assistant-query"><summary>Как проверен вопрос · ${query.steps.length} действий</summary><ol>${query.steps
       .map((rawStep) => {
         const step = object(rawStep);
-        return `<li><strong>${escapeHtml(operations[String(step.tool)] ?? step.tool)}</strong><p>${escapeHtml(step.summary ?? "")}</p></li>`;
+        return `<li><strong>${escapeHtml(operations[String(step.tool)] ?? "Проверка графа")}</strong><p>${escapeHtml(step.summary ?? "")}</p></li>`;
       })
       .join(
         "",
@@ -87,6 +93,74 @@ function pathsHtml(facts: unknown[], known: Set<string>, refs: (gids: string[]) 
     ? `<details class="assistant-paths" open><summary>Пути и переводы</summary>${groups.join("")}<p class="fine-print">Суммы относятся к отдельным рёбрам за весь период. Они не суммируются в сквозной поток и не доказывают хронологию движения тех же денег.</p></details>`
     : "";
 }
+
+function factsHtml(facts: unknown[], refs: (gids: string[]) => string): string {
+  const names: Record<string, string> = {
+    gid: "Узел",
+    role: "Роль",
+    rank: "Место в рейтинге",
+    priority_score: "Приоритет",
+    role_score: "Поддержка роли",
+    in_deg: "Плательщики",
+    out_deg: "Получатели",
+    in_kzt: "Вход от других клиентов",
+    out_kzt: "Выход другим клиентам",
+    volume: "Денежный объём",
+    in_tx: "Входящих переводов",
+    out_tx: "Исходящих переводов",
+    depth: "Уровень",
+    cluster_id: "Сообщество",
+    matched_count: "Подходящих узлов",
+    shown_count: "Показано узлов",
+    n_nodes: "Узлы",
+    n_active_nodes: "Активные узлы",
+    n_edges: "Связи",
+    n_transactions: "Переводы",
+    n_seed: "Исходные seed",
+    n_clusters: "Сообщества",
+    n_isolates: "Без связей",
+    n_boundary: "На границе наблюдения",
+    n_components: "Компоненты связности",
+    n_anomalous_profiles: "Необычные профили",
+    turnover_kzt: "Наблюдаемый оборот",
+    period_from: "Начало периода",
+    period_to: "Конец периода",
+    source_count: "Источников",
+    direct_sum_kzt: "Сумма прямых переводов",
+    matched_sources: "Связанных источников",
+  };
+  const groups = facts
+    .slice(0, 40)
+    .map((raw) => {
+      const fact = object(raw);
+      const rows = Object.entries(fact).filter(
+        ([key, value]) =>
+          names[key] &&
+          (typeof value === "string" || typeof value === "number" || typeof value === "boolean"),
+      );
+      if (!rows.length) return "";
+      return `<dl class="node-metrics assistant-fact">${rows
+        .map(([key, value]) => {
+          const content =
+            key === "gid" && typeof value === "string"
+              ? refs([value]) || escapeHtml(value)
+              : key.endsWith("_kzt") || key === "volume"
+                ? typeof value === "number"
+                  ? money(value)
+                  : escapeHtml(value)
+                : key === "role"
+                  ? escapeHtml(labels[String(value)] ?? value)
+                  : escapeHtml(value);
+          return `<div><dt>${names[key]}</dt><dd>${content}</dd></div>`;
+        })
+        .join("")}</dl>`;
+    })
+    .filter(Boolean);
+  return groups.length
+    ? `<details class="assistant-facts"><summary>Числа из расчёта · ${groups.length} записей</summary><p class="fine-print">Эти значения получены из графа сервером, до интерпретации AI.</p>${groups.join("")}</details>`
+    : "";
+}
+
 interface ConversationTurn {
   question: string;
   result: AssistantResponse;
@@ -155,6 +229,8 @@ export class AnalystAssistant {
     $("assistant-result").innerHTML = "";
     $("assistant-new").hidden = true;
     $<HTMLTextAreaElement>("assistant-question").value = "";
+    $<HTMLTextAreaElement>("assistant-question").placeholder =
+      "Что здесь важно? Кто собирает деньги? Что проверить дальше?";
     this.updateContext();
     this.expand(false);
   }
@@ -178,6 +254,21 @@ export class AnalystAssistant {
     if (filters.cluster !== null) parts.push(`Сообщество #${filters.cluster}`);
     if (filters.depth !== null) parts.push(`Уровень ${filters.depth}`);
     if (filters.seeds) parts.push("Только seed");
+    if (context.queue) {
+      const sorts: Record<string, string> = {
+        rank: "место",
+        volume: "объём",
+        in_kzt: "вход",
+        out_kzt: "выход",
+        in_deg: "плательщики",
+        out_deg: "получатели",
+        role_score: "поддержка роли",
+      };
+      parts.push(
+        `Очередь с позиции ${context.queue.offset + 1} · ${sorts[context.queue.sort] ?? context.queue.sort} ${context.queue.order === "desc" ? "↓" : "↑"}`,
+      );
+      if (context.queue.search) parts.push(`Поиск «${context.queue.search}»`);
+    }
     $("assistant-context").textContent = parts.length
       ? `Вижу контекст: ${parts.join(" · ")}. Можно спросить и обо всём графе.`
       : "Весь граф · Задайте вопрос своими словами, выбирать узлы необязательно.";
@@ -237,7 +328,7 @@ export class AnalystAssistant {
                   `<button class="text-button gid" data-assistant-gid="${escapeHtml(gid)}">${escapeHtml(gid)} ↗</button>`,
               )
               .join(" · ");
-          return `<article class="assistant-answer" data-assistant-turn="${index}"><p class="assistant-question-echo"><strong>Вы</strong> · ${escapeHtml(question)}</p><p class="assistant-answer-label">AI · Интерпретация по проверенным фактам</p><p class="assistant-answer-text">${linkedText(result.answer)}</p>${result.claims.length ? `<ul class="assistant-claims">${result.claims.map((claim) => `<li><p>${linkedText(claim.text)}</p><div>${refs(claim.gids)}</div></li>`).join("")}</ul>` : ""}${queryHtml(result.query, refs)}${pathsHtml(result.facts, known, refs)}${result.nodes.length ? `<details class="assistant-evidence"><summary>Узлы и основания · ${result.nodes.length}</summary>${result.nodes.map((node) => `<div class="assistant-node">${refs([node.gid])}<span>${escapeHtml(labels[node.role] ?? node.role)}</span><p>${escapeHtml(node.evidence)}</p></div>`).join("")}</details>` : ""}${result.limitations.length ? `<details class="assistant-limitations"><summary>Границы ответа</summary><ul>${result.limitations.map((text) => `<li>${escapeHtml(text)}</li>`).join("")}</ul></details>` : ""}${result.actions?.length ? `<div class="assistant-navigation">${result.actions.map((action, actionIndex) => ((action.type === "focus_node" && action.gid && known.has(action.gid)) || (action.type === "show_view" && ["graph", "queue", "analysis", "clusters"].includes(action.view ?? "")) ? `<button class="button secondary" data-assistant-action="${index}:${actionIndex}">${escapeHtml(action.label)} ↗</button>` : "")).join("")}</div>` : ""}${
+          return `<article class="assistant-answer" data-assistant-turn="${index}"><p class="assistant-question-echo"><strong>Вы</strong> · ${escapeHtml(question)}</p><p class="assistant-answer-label">AI · Интерпретация по проверенным фактам</p><p class="assistant-answer-text">${linkedText(result.answer)}</p>${result.claims.length ? `<ul class="assistant-claims">${result.claims.map((claim) => `<li><p>${linkedText(claim.text)}</p><div>${refs(claim.gids)}</div></li>`).join("")}</ul>` : ""}${queryHtml(result.query, refs)}${factsHtml(result.facts, refs)}${pathsHtml(result.facts, known, refs)}${result.nodes.length ? `<details class="assistant-evidence"><summary>Узлы и основания · ${result.nodes.length}</summary>${result.nodes.map((node) => `<div class="assistant-node">${refs([node.gid])}<span>${escapeHtml(labels[node.role] ?? node.role)}</span><p>${escapeHtml(node.evidence)}</p></div>`).join("")}</details>` : ""}${result.limitations.length ? `<details class="assistant-limitations"><summary>Границы ответа</summary><ul>${result.limitations.map((text) => `<li>${escapeHtml(text)}</li>`).join("")}</ul></details>` : ""}${result.actions?.length ? `<div class="assistant-navigation">${result.actions.map((action, actionIndex) => ((action.type === "focus_node" && action.gid && known.has(action.gid)) || (action.type === "show_view" && ["graph", "queue", "analysis", "clusters"].includes(action.view ?? "")) ? `<button class="button secondary" data-assistant-action="${index}:${actionIndex}">${escapeHtml(action.label)} ↗</button>` : "")).join("")}</div>` : ""}${
             result.followups?.length
               ? `<div class="assistant-followups"><span class="fine-print">Можно уточнить</span>${result.followups
                   .slice(0, 3)
@@ -301,6 +392,7 @@ export class AnalystAssistant {
             active_gid: context.active_gid,
             filters: context.filters,
             active_tab: context.active_tab,
+            ...(context.queue ? { queue: context.queue } : {}),
           },
           conversation_id: this.conversationId,
         }),

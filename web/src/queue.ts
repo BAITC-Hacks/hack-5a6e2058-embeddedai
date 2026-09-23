@@ -1,4 +1,4 @@
-import type { NodeDetail, QueueResponse } from "./types";
+import type { AssistantQueueContext, NodeDetail, QueueResponse } from "./types";
 import { $, api, download, escapeHtml, labels, money, percent } from "./ui";
 
 const selectionLimit = 20;
@@ -16,6 +16,7 @@ export class InvestigationQueue {
   private selected = new Set<string>();
   private notes: Record<string, string> = {};
   private matched = 0;
+  private visibleContext: AssistantQueueContext | undefined;
   private controller: AbortController | undefined;
   constructor(
     private filters: () => URLSearchParams,
@@ -57,6 +58,7 @@ export class InvestigationQueue {
     this.controller?.abort();
     ++this.sequence;
     this.run = "";
+    this.visibleContext = undefined;
     this.selected.clear();
     this.notes = {};
     $("queue-table").innerHTML = "";
@@ -92,6 +94,11 @@ export class InvestigationQueue {
   }
   selectedGids(): string[] {
     return [...this.selected];
+  }
+  assistantContext(): AssistantQueueContext | undefined {
+    return this.visibleContext
+      ? { ...this.visibleContext, visible_gids: [...this.visibleContext.visible_gids] }
+      : undefined;
   }
   refresh() {
     this.offset = 0;
@@ -138,6 +145,9 @@ export class InvestigationQueue {
     this.controller?.abort();
     this.controller = new AbortController();
     const sequence = ++this.sequence;
+    // A pending page must not pair its new controls with the previous page's gids.
+    this.visibleContext = undefined;
+    this.changed();
     const params = this.filters();
     params.set("sort", $<HTMLSelectElement>("queue-sort").value);
     params.set("order", $<HTMLSelectElement>("queue-order").value);
@@ -156,6 +166,15 @@ export class InvestigationQueue {
       });
       if (sequence !== this.sequence) return;
       this.matched = result.matched;
+      this.visibleContext = {
+        visible_gids: result.nodes.slice(0, selectionLimit).map((node) => node.gid),
+        search,
+        sort: params.get("sort") ?? "rank",
+        order: params.get("order") === "desc" ? "desc" : "asc",
+        offset: result.offset,
+        matched: result.matched,
+        has_more_visible: result.nodes.length > selectionLimit,
+      };
       $("queue-table").innerHTML = result.nodes.length
         ? `<table class="queue-results"><thead><tr><th>Выбор</th><th>Место · узел · роль</th><th>Потоки / связи</th><th>Основание</th><th>Личная заметка</th></tr></thead><tbody>${result.nodes.map((node) => `<tr><td><input type="checkbox" data-queue-check="${escapeHtml(node.gid)}" aria-label="Выбрать узел ${escapeHtml(node.gid)}"></td><td><span class="tiny">#${node.rank} · ${percent(node.priority_score)}</span><button class="text-button gid" data-queue-gid="${escapeHtml(node.gid)}">${escapeHtml(node.gid)}</button><span>${escapeHtml(labels[node.role] ?? node.role)}</span><small>Сообщество #${node.cluster_id} · уровень ${node.depth}${node.is_seed ? " · seed" : ""}</small></td><td><span>Вход ${money(node.in_kzt)}</span><span>Выход ${money(node.out_kzt)}</span><small>${node.in_deg} плательщиков / ${node.out_deg} получателей</small></td><td>${escapeHtml(node.evidence)}${node.n_anomaly_signals ? `<small>Сигналов профиля: ${node.n_anomaly_signals}</small>` : ""}</td><td><textarea data-queue-note="${escapeHtml(node.gid)}" aria-label="Заметка по узлу ${escapeHtml(node.gid)}" maxlength="1000" rows="2" placeholder="Что проверить">${escapeHtml(this.notes[node.gid] ?? "")}</textarea></td></tr>`).join("")}</tbody></table>`
         : '<p class="queue-empty">По этим фильтрам узлов нет. Измените роль, сообщество, уровень или строку поиска.</p>';

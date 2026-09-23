@@ -200,11 +200,21 @@ export interface QueueResponse {
   offset: number;
   limit: number;
 }
+export interface AssistantQueueContext {
+  visible_gids: string[];
+  search: string;
+  sort: string;
+  order: "asc" | "desc";
+  offset: number;
+  matched: number;
+  has_more_visible: boolean;
+}
 export interface AssistantContext {
   selected_gids: string[];
   active_gid: string | null;
   filters: { role: string | null; cluster: number | null; depth: number | null; seeds: boolean };
   active_tab: string;
+  queue?: AssistantQueueContext;
 }
 export interface AssistantAction {
   type: "focus_node" | "show_view";

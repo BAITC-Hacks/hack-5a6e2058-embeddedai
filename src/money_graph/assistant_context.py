@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .assistant_prompts import VIEWS
+from .queue import SORT_FIELDS
 from .roles import LABELS
 
 GID = re.compile(r"(?:0|-?[1-9][0-9]*)\Z")
@@ -37,25 +38,41 @@ def validate_request(body: Any, known: set[str]) -> tuple[str, list[str]]:
         or not required <= set(body)
         or set(body) - required - {"context", "conversation_id"}
     ):
-        raise AssistantError(422, "Нужны question и selected_gids; допустимы context и conversation_id")
+        raise AssistantError(
+            422, "Нужны question и selected_gids; допустимы context и conversation_id"
+        )
     question, selected = body["question"], body["selected_gids"]
     if not isinstance(question, str) or not 2 <= len(question.strip()) <= 2000:
         raise AssistantError(422, "Вопрос должен содержать от 2 до 2000 символов")
-    if not isinstance(selected, list) or len(selected) > 20 or any(not valid_gid(g) for g in selected):
+    if (
+        not isinstance(selected, list)
+        or len(selected) > 20
+        or any(not valid_gid(g) for g in selected)
+    ):
         raise AssistantError(422, "Выберите до 20 узлов; gid должны быть строками int64")
     if any(g not in known for g in selected):
         raise AssistantError(422, "Один из выбранных gid отсутствует в текущем графе")
     cid = body.get("conversation_id")
-    if cid is not None and (not isinstance(cid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32}", cid)):
+    if cid is not None and (
+        not isinstance(cid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32}", cid)
+    ):
         raise AssistantError(422, "Некорректный идентификатор диалога. Начните новый диалог")
     return question.strip(), list(dict.fromkeys(selected))
 
 
 def validate_context(raw: Any, result: dict[str, Any], known: set[str]) -> dict[str, Any]:
     if raw is None:
-        return {"active_gid": None, "active_tab": "graph", "filters": {"role": None, "cluster": None, "depth": None, "seeds": False}}
+        return {
+            "active_gid": None,
+            "active_tab": "graph",
+            "filters": {"role": None, "cluster": None, "depth": None, "seeds": False},
+        }
     bad = "Некорректный контекст экрана. Обновите страницу и повторите"
-    if not isinstance(raw, dict) or set(raw) != {"active_gid", "active_tab", "filters"}:
+    if (
+        not isinstance(raw, dict)
+        or not {"active_gid", "active_tab", "filters"} <= set(raw)
+        or set(raw) - {"active_gid", "active_tab", "filters", "queue"}
+    ):
         raise AssistantError(422, bad)
     gid = raw["active_gid"]
     if gid is not None and (not valid_gid(gid) or gid not in known):
@@ -70,8 +87,45 @@ def validate_context(raw: Any, result: dict[str, Any], known: set[str]) -> dict[
     depth, cluster = filters["depth"], filters["cluster"]
     if depth is not None and (type(depth) is not int or not 0 <= depth <= 4):
         raise AssistantError(422, bad)
-    if cluster is not None and (type(cluster) is not int or cluster not in {n["cluster_id"] for n in result["nodes"]}):
+    if cluster is not None and (
+        type(cluster) is not int or cluster not in {n["cluster_id"] for n in result["nodes"]}
+    ):
         raise AssistantError(422, bad)
+    queue = raw.get("queue")
+    if queue is not None:
+        if not isinstance(queue, dict) or set(queue) != {
+            "visible_gids",
+            "search",
+            "sort",
+            "order",
+            "offset",
+            "matched",
+            "has_more_visible",
+        }:
+            raise AssistantError(422, bad)
+        visible = queue["visible_gids"]
+        if (
+            not isinstance(visible, list)
+            or len(visible) > 20
+            or any(not valid_gid(g) or g not in known for g in visible)
+        ):
+            raise AssistantError(422, bad)
+        if (
+            not isinstance(queue["search"], str)
+            or len(queue["search"]) > 30
+            or not isinstance(queue["sort"], str)
+            or queue["sort"] not in SORT_FIELDS
+            or queue["order"] not in ("asc", "desc")
+        ):
+            raise AssistantError(422, bad)
+        if (
+            any(
+                type(queue[k]) is not int or not 0 <= queue[k] <= len(known)
+                for k in ("offset", "matched")
+            )
+            or type(queue["has_more_visible"]) is not bool
+        ):
+            raise AssistantError(422, bad)
     return {**raw, "filters": {**filters, "role": filters["role"] or None}}
 
 
@@ -95,14 +149,17 @@ class Conversations:
 
     def get(self, cid: str | None, run_id: str, report: dict[str, Any]) -> tuple[str, Conversation]:
         now = time.monotonic()
-        for key, session in list(self.sessions.items()):
-            if now - session.updated >= self.TTL:
+        for key, existing in list(self.sessions.items()):
+            if now - existing.updated >= self.TTL:
                 del self.sessions[key]
         fingerprint = hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest()
         if cid is not None:
             session = self.sessions.get(cid)
             if session is None or session.run_id != run_id or session.fingerprint != fingerprint:
-                raise AssistantError(409, "Диалог устарел или относится к другому набору. Начните новый диалог и повторите вопрос")
+                raise AssistantError(
+                    409,
+                    "Диалог устарел или относится к другому набору. Начните новый диалог и повторите вопрос",
+                )
             return cid, session
         return secrets.token_urlsafe(24), Conversation(run_id, fingerprint, now)
 
@@ -114,7 +171,7 @@ class Conversations:
         turn = {
             "question": question,
             "answer": answer["answer"],
-            "gids": [row["gid"] for row in answer["nodes"]],
+            "gids": [row["gid"] for row in answer["nodes"][:20]],
             "verified_facts": facts,
             "queries": answer["query"],
         }

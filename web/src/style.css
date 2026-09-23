@@ -1660,3 +1660,14 @@ textarea:focus-visible {
   text-align: left;
   overflow-wrap: anywhere;
 }
+.assistant-fact {
+  max-width: 640px;
+}
+.assistant-fact + .assistant-fact {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+#ask-node {
+  display: block;
+  margin: 9px 0 7px;
+}

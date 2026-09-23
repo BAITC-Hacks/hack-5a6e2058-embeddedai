@@ -44,6 +44,7 @@ test("AI remembers a conversation, sends actual context, links grounded citation
     await route.fulfill({json: {...reply,
       answer: `Проверьте [gid:${gid}]. Неподтверждённая ссылка [gid:999]. <script>bad()</script>`,
       nodes: [{gid, role: "consolidator", evidence: "Наблюдается входящий поток."}],
+      facts: [{gid, in_kzt: 123456, in_deg: 5}],
       followups: ["А почему именно он?"],
       actions: [{type: "show_view", label: "Открыть очередь", gid: null, view: "queue"}],
     }});
@@ -61,6 +62,9 @@ test("AI remembers a conversation, sends actual context, links grounded citation
   await expect(page.locator(".assistant-answer-text")).toContainText("<script>bad()</script>");
   await expect(page.locator(`.assistant-answer-text [data-assistant-gid="${activeGid}"]`)).toBeVisible();
   await expect(page.locator('[data-assistant-gid="999"]')).toHaveCount(0);
+  await page.locator(".assistant-facts summary").click();
+  await expect(page.locator(".assistant-facts")).toContainText("Плательщики");
+  await expect(page.locator(".assistant-facts")).toContainText("123");
   await expect(page.locator("#graph-wrapper")).toBeVisible();
   await expect(page.locator("#queue-view")).toBeHidden();
   await page.locator("[data-assistant-action]").click();
@@ -106,4 +110,40 @@ test("an expired dialogue clears continuation without issuing an automatic paid 
   await page.locator("#assistant-send").click();
   await expect(page.locator(".assistant-answer")).toHaveCount(2);
   expect(requests[2].conversation_id).toBe(null);
+});
+
+test("AI receives the ordered visible queue page with search and sort, without local notes", async ({page}) => {
+  await page.route("**/api/assistant/status", route => route.fulfill({json: {enabled: true, model: "test-model"}}));
+  let payload: Record<string, any> | undefined;
+  await page.route("**/assistant", async route => {
+    payload = route.request().postDataJSON();
+    await route.fulfill({json: reply});
+  });
+  await page.goto("/");
+  await expect(page.locator(".node-id")).toBeVisible();
+  const run = new URL(page.url()).searchParams.get("run");
+  await page.locator("#tab-queue").click();
+  const searched = page.waitForResponse(response => response.url().includes("/nodes?") && response.url().includes("search=900"));
+  await page.locator("#queue-search").fill("900");
+  await searched;
+  await page.locator("#queue-sort").selectOption("in_kzt");
+  await expect(page.locator("#queue-order")).toHaveValue("desc");
+  const firstPage = await (await page.request.get(`/api/runs/${run}/nodes?search=900&sort=in_kzt&order=desc&offset=0&limit=25`)).json();
+  await expect(page.locator("[data-queue-gid]").first()).toHaveText(firstPage.nodes[0].gid);
+  await expect(page.locator("#queue-next")).toBeEnabled();
+  await page.locator("#queue-next").click();
+  const secondPage = await (await page.request.get(`/api/runs/${run}/nodes?search=900&sort=in_kzt&order=desc&offset=25&limit=25`)).json();
+  await expect(page.locator("[data-queue-gid]").first()).toHaveText(secondPage.nodes[0].gid);
+  await expect(page.locator("#queue-count")).toContainText("26–50");
+  await page.locator("[data-queue-note]").first().fill("Личная заметка, не отправлять");
+  await page.locator("#assistant-question").fill("Почему первый в этой очереди?");
+  await page.locator("#assistant-send").click();
+  await expect(page.locator(".assistant-answer")).toHaveCount(1);
+  expect(payload?.context.queue).toEqual({
+    visible_gids: secondPage.nodes.slice(0,20).map((node: {gid: string}) => node.gid),
+    search: "900", sort: "in_kzt", order: "desc", offset: 25,
+    matched: secondPage.matched, has_more_visible: true,
+  });
+  expect(JSON.stringify(payload)).not.toContain("Личная заметка");
+  expect(payload?.selected_gids).toEqual([]);
 });

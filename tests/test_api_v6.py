@@ -31,23 +31,26 @@ def client_for(tmp_path):
     return client, run, result
 
 
-def provider_response(operation="rank_nodes", gids=None):
+def provider_response(gid=None):
     return {
         "status": "completed",
         "output": [
             {
                 "type": "function_call",
-                "name": "query_graph",
+                "name": "answer_question",
+                "call_id": "answer_1",
                 "arguments": json.dumps(
                     {
-                        "operation": operation,
-                        "gids": gids or [],
-                        "role": "all",
-                        "limit": 3,
-                        "max_hops": 1,
-                        "min_sources": 0,
-                        "sort_by": "priority_score",
-                        "clarification": "",
+                        "answer": f"Проверьте [gid:{gid}]."
+                        if gid
+                        else "Уточните узлы для сравнения.",
+                        "claims": [{"text": "Проверяемый узел", "gids": [gid]}] if gid else [],
+                        "followups": ["Какие связи проверить дальше?"],
+                        "actions": [
+                            {"type": "focus_node", "label": "Открыть", "gid": gid, "view": None}
+                        ]
+                        if gid
+                        else [],
                     }
                 ),
             }
@@ -219,7 +222,7 @@ def test_assistant_endpoint_checks_access_token_and_returns_only_real_node_refer
     monkeypatch.setenv("MONEY_GRAPH_ASSISTANT_TOKEN", "unit-access-code")
     calls = []
 
-    def provider(*args):
+    def provider(*args, **kwargs):
         calls.append(args)
         return provider_response()
 
@@ -247,7 +250,7 @@ def test_assistant_endpoint_rejects_invalid_question_without_calling_provider(
 ):
     monkeypatch.setenv("OPENAI_API_KEY", "unit-test-provider-key")
     calls = []
-    monkeypatch.setattr(assistant, "request_openai", lambda *args: calls.append(args))
+    monkeypatch.setattr(assistant, "request_openai", lambda *args, **kwargs: calls.append(args))
     client, run, _ = client_for(tmp_path)
     endpoint = f"/api/runs/{run}/assistant"
     for body in (
@@ -280,16 +283,18 @@ def test_assistant_provider_timeout_and_invalid_output_become_actionable_http_er
     endpoint = f"/api/runs/{run}/assistant"
     body = {"question": "Кто первый?", "selected_gids": []}
 
-    def timeout(*args):
+    def timeout(*args, **kwargs):
         raise AssistantError(504, "Не удалось дождаться OpenAI")
 
     monkeypatch.setattr(assistant, "request_openai", timeout)
     assert client.post(endpoint, json=body).status_code == 504
     monkeypatch.setattr(
-        assistant, "request_openai", lambda *args: {"status": "completed", "output": [None]}
+        assistant,
+        "request_openai",
+        lambda *args, **kwargs: {"status": "completed", "output": [None]},
     )
     assert client.post(endpoint, json=body).status_code == 502
-    monkeypatch.setattr(assistant, "request_openai", lambda *args: provider_response())
+    monkeypatch.setattr(assistant, "request_openai", lambda *args, **kwargs: provider_response())
     assert client.post(endpoint, json=body).status_code == 200
 
 
@@ -298,13 +303,13 @@ def test_assistant_endpoint_cannot_hallucinate_a_known_unselected_client(tmp_pat
     client, run, result = client_for(tmp_path)
     selected, hallucinated = [row["gid"] for row in result["nodes"][:2]]
     monkeypatch.setattr(
-        assistant, "request_openai", lambda *args: provider_response("node_summary", [hallucinated])
+        assistant, "request_openai", lambda *args, **kwargs: provider_response(hallucinated)
     )
     response = client.post(
         f"/api/runs/{run}/assistant",
         json={"question": "Объясни выбранный узел", "selected_gids": [selected]},
     )
-    assert response.status_code == 502 and "вне вопроса" in response.json()["detail"]
+    assert response.status_code == 502 and "неподтверждённые" in response.json()["detail"]
 
 
 def test_assistant_concurrent_endpoint_requests_make_only_one_paid_call(tmp_path, monkeypatch):
@@ -312,7 +317,7 @@ def test_assistant_concurrent_endpoint_requests_make_only_one_paid_call(tmp_path
     started, release = threading.Event(), threading.Event()
     calls = []
 
-    def provider(*args):
+    def provider(*args, **kwargs):
         calls.append(args)
         started.set()
         assert release.wait(10)
@@ -331,3 +336,77 @@ def test_assistant_concurrent_endpoint_requests_make_only_one_paid_call(tmp_path
             release.set()
         assert first.result(timeout=10).status_code == 200
     assert len(calls) == 1
+
+
+def test_assistant_api_preserves_followup_context_and_rejects_changed_snapshot(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "unit-test-provider-key")
+    client, run, result = client_for(tmp_path)
+    selected, opened = [row["gid"] for row in result["nodes"][:2]]
+    calls = []
+
+    def provider(key, model, items, **kwargs):
+        calls.append(copy.deepcopy(items))
+        return provider_response(opened)
+
+    monkeypatch.setattr(assistant, "request_openai", provider)
+    endpoint = f"/api/runs/{run}/assistant"
+    context = {
+        "active_gid": opened,
+        "active_tab": "queue",
+        "filters": {"role": None, "cluster": None, "depth": None, "seeds": False},
+    }
+    first = client.post(
+        endpoint,
+        json={
+            "question": "Объясни открытую карточку",
+            "selected_gids": [selected],
+            "context": context,
+        },
+    )
+    assert first.status_code == 200 and first.json()["nodes"][0]["gid"] == opened
+    assert first.headers["cache-control"] == "no-store"
+    cid = first.json()["conversation_id"]
+    second = client.post(
+        endpoint,
+        json={"question": "А что с ним дальше?", "selected_gids": [], "conversation_id": cid},
+    )
+    assert second.status_code == 200 and second.json()["conversation_id"] == cid
+    assert opened in json.dumps(json.loads(calls[1][0]["content"])["recent_history"])
+    result["report"]["runtime_seconds"] += 1
+    (tmp_path / run / "result.json").write_text(
+        json.dumps(result, ensure_ascii=False), encoding="utf-8"
+    )
+    stale = client.post(
+        endpoint, json={"question": "Продолжай", "selected_gids": [], "conversation_id": cid}
+    )
+    assert stale.status_code == 409 and len(calls) == 2
+
+
+def test_assistant_api_conversation_cannot_cross_run_boundary(tmp_path, monkeypatch):
+    import shutil
+
+    monkeypatch.setenv("OPENAI_API_KEY", "unit-test-provider-key")
+    client, run, _ = client_for(tmp_path)
+    calls = []
+
+    def provider(*args, **kwargs):
+        calls.append(1)
+        return provider_response()
+
+    monkeypatch.setattr(assistant, "request_openai", provider)
+    initial = client.post(
+        f"/api/runs/{run}/assistant", json={"question": "Объясни граф", "selected_gids": []}
+    ).json()
+    other = "f" * 32
+    shutil.copytree(tmp_path / run, tmp_path / other)
+    response = client.post(
+        f"/api/runs/{other}/assistant",
+        json={
+            "question": "Продолжи",
+            "selected_gids": [],
+            "conversation_id": initial["conversation_id"],
+        },
+    )
+    assert response.status_code == 409 and len(calls) == 1

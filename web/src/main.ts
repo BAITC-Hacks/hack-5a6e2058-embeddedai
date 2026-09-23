@@ -322,6 +322,7 @@ function assistantContext(): AssistantContext {
       seeds: $<HTMLInputElement>("seeds").checked,
     },
     active_tab: activeTab,
+    ...(activeTab === "queue" ? { queue: queue.assistantContext() } : {}),
   };
 }
 
