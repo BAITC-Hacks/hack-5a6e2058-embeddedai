@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "random_seed": 42,
+  "max_depth": 4,
+  "betweenness_samples": 128,
+  "louvain_resolution": 1.0,
+  "coordinator_min_seeds": 2,
+  "coordinator_min_in": 3,
+  "coordinator_min_out": 2,
+  "coordinator_betweenness_percentile": 0.9,
+  "distributor_min_out": 10,
+  "transit_ratio_min": 0.8,
+  "transit_ratio_max": 1.2,
+  "consolidator_min_in": 3,
+  "consolidator_ratio_max": 0.2,
+  "incomplete_support_multiplier": 0.7,
+  "priority_weights": {"pagerank": 0.25, "betweenness": 0.25, "seed_reach": 0.2, "in_deg": 0.15, "out_deg": 0.15}
+}
