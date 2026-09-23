@@ -46,6 +46,8 @@ def baseline(tmp_path_factory):
         "web/dist/assets/app.js",
         "web/src/main.ts",
         "web/package.json",
+        "deploy/money-graph.service",
+        ".github/workflows/verify.yml",
         "docs/SOLUTION.svg",
         "output/submission/SOLUTION.pdf",
         "output/submission/START_HERE.md",
@@ -99,6 +101,8 @@ def test_archive_is_reproducible_and_manifest_matches_every_extracted_file(proje
         assert "money-graph/submission/START_HERE.md" in names
         assert "money-graph/web/dist/assets/app.js" in names
         assert "money-graph/data/data/nodes.parquet" in names
+        assert "money-graph/deploy/money-graph.service" in names
+        assert "money-graph/.github/workflows/verify.yml" in names
     # The independent check still runs with site-packages disabled after extraction.
     checked = subprocess.run(
         [

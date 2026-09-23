@@ -34,7 +34,7 @@ ROOT_FILES = (
     "Dockerfile",
     "Makefile",
 )
-TREES = ("src", "config", "scripts", "tests", "docs", "deploy", "web")
+TREES = ("src", "config", "scripts", "tests", "docs", "deploy", "web", ".github/workflows")
 DATA_FILES = (
     "data/README.md",
     "data/ТЗ.md",
@@ -100,6 +100,7 @@ SUFFIXES = {
     ".csv",
     ".pdf",
     ".map",
+    ".service",
 }
 SECRET_NAME = re.compile(
     r"(?:^|[._-])(?:secrets?|credentials?|passwords?|tokens?|api[_-]?key|apikey|id_rsa|id_ed25519|hetzner_vps)(?:[._-]|$)",
