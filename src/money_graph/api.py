@@ -16,20 +16,30 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .demo import create_demo
+from .investigation import node_evidence, resilience
 from .loader import DataError
-from .pipeline import EXPORTS, ROOT, analyze, write_result
+from .pipeline import EXPORTS, ROOT, analyze, read_rules, write_result
 from .roles import LABELS
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 
 
 def create_app(initial_data: Path | None = None, storage: Path | None = None) -> FastAPI:
-    app = FastAPI(title="Граф денег", version="0.1.0")
+    app = FastAPI(title="Граф денег", version="0.2.0")
     directory = (storage or Path(os.getenv("MONEY_GRAPH_STORAGE", ROOT / "var/runs"))).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     gate = threading.Lock()
     bootstrap_file = directory / "bootstrap.json"
-    if not bootstrap_file.exists() or initial_data is not None:
+    version = read_rules()["version"]
+    current = False
+    if bootstrap_file.exists():
+        previous = json.loads(bootstrap_file.read_text())
+        stored = directory / previous["run_id"] / "result.json"
+        current = (
+            stored.is_file()
+            and json.loads(stored.read_text())["report"]["rules_version"] == version
+        )
+    if not current or initial_data is not None:
         demo = initial_data is None
         if demo:
             with tempfile.TemporaryDirectory() as temp:
@@ -50,11 +60,17 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
             raise HTTPException(
                 404, "Расчёт не найден или срок хранения истёк; загрузите данные повторно"
             )
-        return json.loads(path.read_text())
+        result = json.loads(path.read_text())
+        if result["report"]["rules_version"] != version:
+            raise HTTPException(
+                409,
+                "Правила анализа обновлены. Загрузите исходные файлы повторно; прежние CSV сохранены на сервере",
+            )
+        return result
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": "0.1.0"}
+        return {"status": "ok", "version": "0.2.0"}
 
     @app.get("/api/bootstrap")
     def initial() -> dict[str, Any]:
@@ -120,6 +136,22 @@ def create_app(initial_data: Path | None = None, storage: Path | None = None) ->
     @app.get("/api/runs/{run_id}/clusters")
     def clusters(run_id: str) -> list[dict[str, Any]]:
         return result_for(run_id)["clusters"]
+
+    @app.get("/api/runs/{run_id}/community-graph")
+    def community_graph(run_id: str) -> dict[str, Any]:
+        result = result_for(run_id)
+        return {"nodes": result["clusters"], "edges": result["cluster_edges"]}
+
+    @app.get("/api/runs/{run_id}/resilience")
+    def simulate(run_id: str, count: Annotated[int, Query(ge=1, le=20)] = 5) -> dict[str, Any]:
+        return resilience(result_for(run_id), count)
+
+    @app.get("/api/runs/{run_id}/nodes/{gid}/investigation")
+    def investigate(run_id: str, gid: str) -> dict[str, Any]:
+        result = result_for(run_id)
+        if gid not in {r["gid"] for r in result["nodes"]}:
+            raise HTTPException(404, "Такого gid нет в наборе")
+        return node_evidence(result, gid)
 
     @app.get("/api/runs/{run_id}/nodes/{gid}")
     def node(run_id: str, gid: str) -> dict[str, Any]:

@@ -75,7 +75,17 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     if role == "terminal":
         warnings.append("Конечный только в наблюдаемом периоде, банке и пороге суммы")
     percent = f"{ratio:.0%}" if math.isfinite(ratio) else "н/д"
-    evidence = f"Плательщиков {row['in_deg']}; получателей {row['out_deg']}; вход {row['in_kzt']:,.0f} KZT; выход/вход {percent}; seed-предков {row['seed_reach']}."
+    criteria = {
+        "coordinator": f"Seed-предков {row['seed_reach']}≥{cfg['coordinator_min_seeds']}; входящих {row['in_deg']}≥{cfg['coordinator_min_in']}; исходящих {row['out_deg']}≥{cfg['coordinator_min_out']}; ранг посредничества {row['p_betweenness']:.1%}≥{cfg['coordinator_betweenness_percentile']:.0%}.",
+        "distributor": f"Получателей {row['out_deg']}≥{cfg['distributor_min_out']}; исходящих переводов {row['out_tx']}≥{cfg['distributor_min_out']}; выход {row['out_kzt']:,.0f} KZT.",
+        "transit": f"Объёмный транзит: выход/вход {percent} в [{cfg['transit_ratio_min']:.0%}; {cfg['transit_ratio_max']:.0%}]; плательщиков {row['in_deg']}, получателей {row['out_deg']}. Не seed/граница.",
+        "consolidator": f"Плательщиков {row['in_deg']}≥{cfg['consolidator_min_in']}; вход {row['in_kzt']:,.0f} KZT; выход/вход {percent}≤{cfg['consolidator_ratio_max']:.0%}. Не seed/граница.",
+        "terminal": f"Вход {row['in_kzt']:,.0f} KZT от {row['in_deg']} плательщиков; исходящих связей нет. Не seed/граница; конечный только в выборке.",
+        "peripheral": f"Порогов конкретных ролей не достиг: плательщиков {row['in_deg']}, получателей {row['out_deg']}, выход/вход {percent}.",
+    }
+    evidence = criteria[role]
+    if role == "peripheral" and (row["boundary_censored"] or row["is_seed"] or row["isolated"]):
+        evidence = f"Недостаточно наблюдений для роли; плательщиков {row['in_deg']}, получателей {row['out_deg']}."
     if row["boundary_censored"]:
         evidence += " Граница depth=4: удержание неизвестно."
     elif row["isolated"]:
@@ -86,6 +96,10 @@ def classify(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         "role": role,
         "role_score": round(max(0, min(score, 1)), 6),
         "matched_rules": list(candidates),
+        "rule_trace": [
+            {"role": key, "matched": key in candidates, "support": round(value, 6)}
+            for key, value in candidates.items()
+        ],
         "evidence": evidence[:200],
         "warnings": warnings,
     }

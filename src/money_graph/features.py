@@ -66,6 +66,7 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
     frame["inflow_unobserved"] = frame.in_kzt == 0
     frame["observed_out_exceeds_in"] = frame.out_kzt > frame.in_kzt
     frame["pass_through"] = frame.out_kzt / frame.in_kzt.where(frame.in_kzt > 0)
+    frame["volume"] = frame[["in_kzt", "out_kzt"]].max(axis=1)
     for metric in (
         "pagerank",
         "betweenness",
@@ -75,6 +76,7 @@ def compute(graph: nx.DiGraph, nodes: pd.DataFrame, rules: dict[str, Any]) -> pd
         "in_tx",
         "out_tx",
         "out_kzt",
+        "volume",
     ):
         frame[f"p_{metric}"] = percentile(frame[metric], ~frame.isolated)
     frame["priority_score"] = sum(

@@ -2,31 +2,8 @@ import cytoscape, { type Core } from "cytoscape";
 import "./style.css";
 import type { Cluster, Edge, GraphResponse, NodeDetail, Report, TopNode } from "./types";
 
-const labels: Record<string, string> = {
-  coordinator: "Связующий узел",
-  consolidator: "Консолидатор",
-  transit: "Транзит",
-  distributor: "Распределитель",
-  terminal: "Конечный в выборке",
-  peripheral: "Мало данных",
-};
-const colors: Record<string, string> = {
-  coordinator: "#8057d4",
-  consolidator: "#e59432",
-  transit: "#3888c7",
-  distributor: "#159b8c",
-  terminal: "#d7748e",
-  peripheral: "#a2b0bc",
-};
-const number = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
-const money = (n: number) => `${number(n)} ₸`;
-const percent = (n: number) => `${Math.round(n * 100)}%`;
-const escapeHtml = (value: unknown) =>
-  String(value).replace(
-    /[&<>"']/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
-  );
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+import { $, api, labels, colors, number, money, percent, escapeHtml, metricLabels, communityColor } from "./ui";
+import { timeline, openInvestigation, renderAnalysis, downloadDossier } from "./analysis";
 let runId = "";
 let cy: Core | undefined;
 let graphSequence = 0;
@@ -65,16 +42,6 @@ $("app").innerHTML = `
   <dialog id="upload-dialog"><form id="upload-form"><div class="dialog-title"><h2>Новый набор данных</h2><button type="button" id="upload-close" class="icon-button" aria-label="Закрыть">×</button></div><p>Загрузите три файла организаторов. Исходные ID сохраняются без округления.</p>${["nodes", "edges", "transactions"].map((name) => `<label class="file-label">${name}.parquet<input type="file" name="${name}" accept=".parquet" required></label>`).join("")}<p class="fine-print">До 10 МБ на файл. Результаты доступны по ссылке расчёта до 24 часов или до удаления старых запусков.</p><div id="upload-error" class="alert" hidden></div><button id="analyze-button" class="button primary" type="submit">Рассчитать граф →</button></form></dialog>
   <dialog id="method-dialog"><div class="dialog-title"><h2>Объяснимый расчёт</h2><button id="method-close" class="icon-button" aria-label="Закрыть">×</button></div><p>Приоритет проверки: 25% PageRank + 25% посредничество + 20% охват seed + 15% входящих связей + 15% исходящих. Признаки нормированы по положительным значениям.</p><p>Роли присваиваются формальными правилами v1.0. Связующий узел: ≥2 seed-предка, ≥3 плательщика, ≥2 получателя и высокое посредничество. Распределитель: ≥10 получателей. Транзит: отношение выхода к входу 0,8–1,2. Консолидатор: ≥3 плательщика и отношение ≤0,2. Конечный в выборке: вход без наблюдаемого выхода.</p><p>У seed и узлов на границе обхода роли не выводятся из отношения потоков. Поддержка роли — эвристический показатель, не вероятность виновности. При пересечении правил приоритет: связующий → распределитель → транзит → консолидатор → конечный → периферия.</p><p>Сообщества: Louvain по суммам потоков в обоих направлениях. Узлы без рёбер сохраняются как отдельные сообщества. Ни номера кластеров, ни роли не являются подтверждением существования преступной группы.</p></dialog>`;
 
-async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, options);
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(
-      typeof body.detail === "string" ? body.detail : `Ошибка сервера (${response.status})`,
-    );
-  }
-  return response.json();
-}
 function alert(message: string) {
   $("alert").textContent = message;
   $("alert").hidden = !message;

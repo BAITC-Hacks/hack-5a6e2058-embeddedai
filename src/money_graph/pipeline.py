@@ -13,7 +13,9 @@ from typing import Any, cast
 import networkx as nx
 import pandas as pd
 
-from . import features
+from . import clusters as cluster_analysis
+from . import features, temporal
+from .investigation import sensitivity
 from .loader import FILES, DataError, load
 from .roles import LABELS, classify
 
@@ -34,7 +36,7 @@ def clean(value: Any) -> Any:
 def read_rules(path: Path | None = None) -> dict[str, Any]:
     cfg = json.loads((path or ROOT / "config/rules.json").read_text())
     weights = cfg["priority_weights"]
-    required = {"pagerank", "betweenness", "seed_reach", "in_deg", "out_deg"}
+    required = {"pagerank", "betweenness", "seed_reach", "in_deg", "out_deg", "volume"}
     if set(weights) != required or any(not math.isfinite(v) or v < 0 for v in weights.values()):
         raise DataError("Неверные веса приоритета")
     if not math.isclose(sum(weights.values()), 1):
@@ -54,19 +56,30 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
     graph = features.build_graph(nodes, edges)
     frame = features.compute(graph, nodes, rules)
     mapping = features.communities(graph, rules)
+    dates = temporal.summarize(tx, list(graph))
     frame["cluster_id"] = frame.gid.map(mapping)
     records = cast(list[dict[str, Any]], frame.to_dict("records"))
     for row in records:
         row.update(classify(row, rules))
+        row["temporal"] = dates[row["gid"]]
         row["priority_score"] = round(row["priority_score"], 6)
         row["priority_parts"] = {
             name: round(row[f"p_{name}"] * weight, 6)
             for name, weight in rules["priority_weights"].items()
         }
+        names = {
+            "pagerank": "входящая значимость",
+            "betweenness": "посредничество",
+            "seed_reach": "охват seed",
+            "in_deg": "плательщики",
+            "out_deg": "получатели",
+            "volume": "денежный объём",
+        }
+        strongest = sorted(row["priority_parts"].items(), key=lambda item: -item[1])[:3]
         row["why"] = (
-            f"Seed-предков: {row['seed_reach']}; входящих связей: {row['in_deg']}; "
-            f"исходящих: {row['out_deg']}; PageRank: {row['pagerank']:.5f}; "
-            f"посредничество: {row['betweenness']:.5f}"
+            "Вклад в приоритет: "
+            + "; ".join(f"{names[key]} +{value * 100:.1f} п.п." for key, value in strongest)
+            + f". Seed-предков {row['seed_reach']}; объём max(вход,выход) {row['volume']:,.0f} KZT. {row['evidence']}"
         )
         row["next_checks"] = [
             "Проверить входящие из других банков и переводы ниже порога 5 000 KZT"
@@ -77,32 +90,17 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
             row["next_checks"].append("Дополнить историю входящих переводов seed-клиента")
         if row["role"] in ("transit", "terminal", "consolidator"):
             row["next_checks"].append("Проверить точное время операций и последующие периоды")
+        if row["temporal"]["max_same_day_senders"] >= 3:
+            row["next_checks"].append(
+                "Проверить назначение синхронных поступлений от нескольких плательщиков"
+            )
     ranked = sorted(records, key=lambda row: (-row["priority_score"], row["gid"]))
     for rank, row in enumerate(ranked, 1):
         row["rank"] = rank
-    clusters = []
-    for cluster_id in sorted(set(mapping.values())):
-        members = [row for row in ranked if row["cluster_id"] == cluster_id]
-        ids = {row["gid"] for row in members}
-        internal = float(edges.loc[edges.src.isin(ids) & edges.dst.isin(ids), "sum_kzt"].sum())
-        n_seed = sum(row["is_seed"] for row in members)
-        dominant = pd.Series([row["role"] for row in members]).value_counts().index[0]
-        hypothesis = (
-            f"Сообщество из {len(members)} узлов, {n_seed} seed; "
-            f"преобладает «{LABELS[dominant]}». Структурная гипотеза, требует проверки."
-        )
-        if len(members) == 1 and members[0]["isolated"]:
-            hypothesis = "Изолированный узел: связи и назначение не установлены в данной выгрузке."
-        clusters.append(
-            {
-                "cluster_id": cluster_id,
-                "n_nodes": len(members),
-                "n_seed": n_seed,
-                "sum_kzt_internal": round(internal, 2),
-                "top_gids": [str(row["gid"]) for row in members[:5]],
-                "hypothesis": hypothesis,
-            }
-        )
+    stability = sensitivity(records, rules["priority_weights"])
+    clusters, cluster_edges = cluster_analysis.summarize(
+        ranked, cast(list[dict[str, Any]], edges.to_dict("records"))
+    )
     report = {
         "n_nodes": len(nodes),
         "n_edges": len(edges),
@@ -112,6 +110,8 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
         "n_isolates": int(frame.isolated.sum()),
         "n_boundary": int(frame.boundary_censored.sum()),
         "n_components": nx.number_weakly_connected_components(graph),
+        "n_connected_components": sum(len(c) > 1 for c in nx.weakly_connected_components(graph)),
+        "sensitivity": stability,
         "turnover_kzt": round(float(edges.sum_kzt.sum()), 2),
         "period_from": str(tx.date.min().date()) if len(tx) else None,
         "period_to": str(tx.date.max().date()) if len(tx) else None,
@@ -151,6 +151,7 @@ def analyze(data_dir: Path, rules_path: Path | None = None) -> dict[str, Any]:
             "nodes": records,
             "edges": edge_records,
             "clusters": clusters,
+            "cluster_edges": cluster_edges,
             "top": top,
         }
     )
@@ -183,32 +184,13 @@ def write_result(result: dict[str, Any], out_dir: Path) -> None:
     staging = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}-", dir=out_dir.parent))
     backup = out_dir.with_name(f".{out_dir.name}-previous")
     try:
-        columns = [
-            "gid",
-            "role",
-            "role_score",
-            "cluster_id",
-            "priority_score",
-            "evidence",
-            "in_deg",
-            "out_deg",
-            "in_kzt",
-            "out_kzt",
-            "in_tx",
-            "out_tx",
-            "pagerank",
-            "betweenness",
-            "seed_reach",
-            "pass_through",
-            "depth",
-            "is_seed",
-            "boundary_censored",
-            "isolated",
-        ]
+        columns = ["gid", "role", "role_score", "cluster_id", "priority_score", "evidence"]
         pd.DataFrame(result["nodes"])[columns].to_csv(
             staging / EXPORTS[0], index=False, float_format="%.8f"
         )
-        clusters = pd.DataFrame(result["clusters"])
+        clusters = pd.DataFrame(result["clusters"])[
+            ["cluster_id", "n_nodes", "n_seed", "sum_kzt_internal", "top_gids", "hypothesis"]
+        ]
         clusters["top_gids"] = clusters.top_gids.map(
             lambda ids: json.dumps(ids, ensure_ascii=False)
         )
