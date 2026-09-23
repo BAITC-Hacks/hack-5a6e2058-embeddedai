@@ -1,10 +1,12 @@
 import { appendRobustness } from "./robustness";
+import { temporalPatternsHtml, temporalPatternsMarkdown } from "./temporal";
 import type { Investigation, NodeDetail, PathEvidence, Report, Resilience } from "./types";
 import { $, api, download, escapeHtml, labels, metricLabels, money, number, percent } from "./ui";
 
 export function timeline(node: NodeDetail): string {
   const t = node.temporal;
-  if (!t.daily.length) return '<p class="muted">Операций в выборке нет.</p>';
+  if (!t.daily.length)
+    return `<p class="muted">Операций в выборке нет.</p>${temporalPatternsHtml(t.patterns)}`;
   const first = Date.parse(t.daily[0].date),
     last = Date.parse(t.daily.at(-1)?.date ?? "");
   const span = Math.max(1, (last - first) / 86400000 + 1);
@@ -20,7 +22,7 @@ export function timeline(node: NodeDetail): string {
       return `<g><title>${day.date}: вход ${money(day.in_kzt)}, выход ${money(day.out_kzt)}, плательщиков ${day.senders}</title><rect x="${x - bar}" y="${105 - a}" width="${bar}" height="${a}" fill="var(--timeline-in)"/><rect x="${x}" y="${105 - b}" width="${bar}" height="${b}" fill="var(--timeline-out)"/></g>`;
     })
     .join("");
-  return `<div class="timeline"><svg viewBox="0 0 680 133" role="img" aria-label="Входящие и исходящие суммы по дням"><title>Дневные потоки: зелёный — вход, фиолетовый — выход</title><path d="M25 105 H660" stroke="var(--border)"/>${bars}<text x="25" y="124">${t.daily[0].date}</text><text x="660" y="124" text-anchor="end">${t.daily.at(-1)?.date}</text></svg><div class="timeline-key"><span>● Вход</span><span>● Выход</span></div></div><dl class="node-metrics"><div><dt>Дней с операциями</dt><dd>${t.active_days}</dd></div><div><dt>Плательщиков за один день, максимум</dt><dd>${t.max_same_day_senders}</dd></div><div><dt>Доля входа в пиковый день</dt><dd>${percent(t.peak_in_share)}</dd></div><div><dt>Сопоставлено с выходом через 1–2 дня</dt><dd>${money(t.matched_1_2d_kzt)} (${percent(t.matched_1_2d_share)} входа)</dd></div><div><dt>Совпадение входа/выхода в один день</dt><dd>${money(t.same_day_overlap_kzt)}</dd></div></dl><p class="fine-print">Сопоставление по FIFO без повторного использования суммы. Внутридневной порядок неизвестен; это совместимость потоков, а не доказательство транзита тех же денег.</p>`;
+  return `<div class="timeline"><svg viewBox="0 0 680 133" role="img" aria-label="Входящие и исходящие суммы по дням"><title>Дневные потоки: зелёный — вход, фиолетовый — выход</title><path d="M25 105 H660" stroke="var(--border)"/>${bars}<text x="25" y="124">${t.daily[0].date}</text><text x="660" y="124" text-anchor="end">${t.daily.at(-1)?.date}</text></svg><div class="timeline-key"><span>● Вход</span><span>● Выход</span></div></div><dl class="node-metrics"><div><dt>Дней с операциями</dt><dd>${t.active_days}</dd></div><div><dt>Плательщиков за один день, максимум</dt><dd>${t.max_same_day_senders}</dd></div><div><dt>Доля входа в пиковый день</dt><dd>${percent(t.peak_in_share)}</dd></div><div><dt>Сопоставлено с выходом через 1–2 дня</dt><dd>${money(t.matched_1_2d_kzt)} (${percent(t.matched_1_2d_share)} входа)</dd></div><div><dt>Совпадение входа/выхода в один день</dt><dd>${money(t.same_day_overlap_kzt)}</dd></div></dl><p class="fine-print">Сопоставление по FIFO без повторного использования суммы. Внутридневной порядок неизвестен; это совместимость потоков, а не доказательство транзита тех же денег.</p>${temporalPatternsHtml(t.patterns)}`;
 }
 function pathHtml(path: PathEvidence): string {
   return `<div class="path-chain">${path.gids.map((gid, i) => `<button class="text-button gid" data-evidence-gid="${gid}">${gid}</button>${i < path.edges.length ? `<span class="path-arrow">→ <small>${money(path.edges[i].sum_kzt)} · ${path.edges[i].n_tx} пер.</small></span>` : ""}`).join("")}</div>`;
@@ -64,7 +66,7 @@ export function downloadDossier(node: NodeDetail, report: Report) {
     .map(([key, v]) => `- ${metricLabels[key]}: ${(v * 100).toFixed(2)} п.п.`)
     .join(
       "\n",
-    )}\n\n## Временные наблюдения\n\nСовместимо с выходом через 1–2 дня: ${money(node.temporal.matched_1_2d_kzt)} (${percent(node.temporal.matched_1_2d_share)} входа). Не доказательство транзита тех же денег.\n\n| Дата | Вход KZT | Выход KZT | Плательщики | Получатели |\n|---|---:|---:|---:|---:|\n${node.temporal.daily.map((d) => `| ${d.date} | ${d.in_kzt} | ${d.out_kzt} | ${d.senders} | ${d.receivers} |`).join("\n")}\n\n## Профиль относительно колена\n\nКолено ${node.anomaly_profile.cohort_depth}, активных узлов ${node.anomaly_profile.cohort_size}; минимум ${node.anomaly_profile.minimum_cohort_size}.\n\n${node.anomaly_profile.signals.map((signal) => `- ${signal.text}`).join("\n")}\n\n${node.anomaly_profile.caveat}\n\n## Ограничения\n\n${[...report.warnings, ...node.warnings].map((x) => `- ${x}`).join("\n")}\n\n## Следующие проверки\n\n${node.next_checks.map((x) => `- ${x}`).join("\n")}\n\n## Связи\n\n${[...node.incoming, ...node.outgoing, ...node.self_transfers].map((e) => `- ${e.src} → ${e.dst}: ${money(e.sum_kzt)}, ${e.n_tx} переводов`).join("\n")}\n\n## Происхождение данных (SHA-256)\n\n${Object.entries(
+    )}\n\n## Временные наблюдения\n\nСовместимо с выходом через 1–2 дня: ${money(node.temporal.matched_1_2d_kzt)} (${percent(node.temporal.matched_1_2d_share)} входа). Не доказательство транзита тех же денег.\n\n| Дата | Вход KZT | Выход KZT | Плательщики | Получатели |\n|---|---:|---:|---:|---:|\n${node.temporal.daily.map((d) => `| ${d.date} | ${d.in_kzt} | ${d.out_kzt} | ${d.senders} | ${d.receivers} |`).join("\n")}\n\n${temporalPatternsMarkdown(node.temporal.patterns)}\n\n## Профиль относительно колена\n\nКолено ${node.anomaly_profile.cohort_depth}, активных узлов ${node.anomaly_profile.cohort_size}; минимум ${node.anomaly_profile.minimum_cohort_size}.\n\n${node.anomaly_profile.signals.map((signal) => `- ${signal.text}`).join("\n")}\n\n${node.anomaly_profile.caveat}\n\n## Ограничения\n\n${[...report.warnings, ...node.warnings].map((x) => `- ${x}`).join("\n")}\n\n## Следующие проверки\n\n${node.next_checks.map((x) => `- ${x}`).join("\n")}\n\n## Связи\n\n${[...node.incoming, ...node.outgoing, ...node.self_transfers].map((e) => `- ${e.src} → ${e.dst}: ${money(e.sum_kzt)}, ${e.n_tx} переводов`).join("\n")}\n\n## Происхождение данных (SHA-256)\n\n${Object.entries(
     report.input_sha256,
   )
     .map(([k, v]) => `- ${k}: ${v}`)

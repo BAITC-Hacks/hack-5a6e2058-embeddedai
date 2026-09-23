@@ -123,6 +123,54 @@ export interface Day {
   senders: number;
   receivers: number;
 }
+export interface TemporalPatterns {
+  version: string;
+  activity: {
+    status: "assessed" | "insufficient_history";
+    active_days: number;
+    minimum_days: number;
+    baseline_median_tx: number | null;
+    threshold_tx: number | null;
+    spike_day_count: number;
+    spike_days: {
+      date: string;
+      in_tx: number;
+      out_tx: number;
+      in_kzt: number;
+      out_kzt: number;
+      n_tx: number;
+    }[];
+    rule: string;
+  };
+  synchronous: {
+    minimum_senders: number;
+    day_count: number;
+    days: { date: string; senders: number; in_tx: number; in_kzt: number }[];
+  };
+  repeated_amounts: {
+    minimum_repeats: number;
+    minimum_transactions: number;
+    directions: Record<
+      "in" | "out",
+      {
+        status: "assessed" | "insufficient_transactions";
+        n_transactions: number;
+        q1_kzt: number | null;
+      }
+    >;
+    group_count: number;
+    groups: {
+      date: string;
+      direction: "in" | "out";
+      amount_kzt: number;
+      n_tx: number;
+      total_kzt: number;
+      counterparties: number;
+    }[];
+    rule: string;
+  };
+  caveat: string;
+}
 export interface Temporal {
   daily: Day[];
   active_days: number;
@@ -131,6 +179,7 @@ export interface Temporal {
   matched_1_2d_kzt: number;
   matched_1_2d_share: number;
   same_day_overlap_kzt: number;
+  patterns?: TemporalPatterns;
 }
 export interface PathEvidence {
   gids: string[];
