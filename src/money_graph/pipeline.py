@@ -479,7 +479,7 @@ def _validate_result(result: dict[str, Any]) -> None:
                 fields(
                     spike,
                     {
-                        "date": lambda v: v in dates,
+                        "date": lambda v, dates=dates: v in dates,
                         "n_tx": integer,
                         "in_tx": integer,
                         "out_tx": integer,
@@ -509,7 +509,7 @@ def _validate_result(result: dict[str, Any]) -> None:
                 fields(
                     signal,
                     {
-                        "date": lambda v: v in dates,
+                        "date": lambda v, dates=dates: v in dates,
                         "senders": lambda v: integer(v, 3),
                         "in_tx": integer,
                         "in_kzt": number,
@@ -543,7 +543,7 @@ def _validate_result(result: dict[str, Any]) -> None:
                 fields(
                     group,
                     {
-                        "date": lambda v: v in dates,
+                        "date": lambda v, dates=dates: v in dates,
                         "direction": lambda v: v in ("in", "out"),
                         "amount_kzt": number,
                         "n_tx": lambda v: integer(v, 3),
