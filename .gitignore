@@ -33,7 +33,7 @@ Thumbs.db
 
 # AGENTS
 AGENTS.md
-/data
+
 # Runtime state and local browser checks
 /var/
 /test-results/
