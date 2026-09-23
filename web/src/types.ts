@@ -200,6 +200,12 @@ export interface QueueResponse {
   offset: number;
   limit: number;
 }
+export interface AssistantContext {
+  selected_gids: string[];
+  active_gid: string | null;
+  filters: { role: string | null; cluster: number | null; depth: number | null; seeds: boolean };
+  active_tab: string;
+}
 export interface AssistantResponse {
   answer: string;
   claims: { text: string; gids: string[] }[];

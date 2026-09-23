@@ -7,6 +7,7 @@ import type { LayoutRequest } from "./layout.worker";
 import { InvestigationQueue } from "./queue";
 import { graphPalette, initializeTheme } from "./theme";
 import type {
+  AssistantContext,
   Cluster,
   CommunityGraph,
   Edge,
@@ -42,9 +43,10 @@ let assistant: AnalystAssistant | undefined;
 
 $("app").innerHTML = `
   <header class="header"><a class="brand" href="/" aria-label="На главную"><span class="brand-icon">◈</span><span>Граф денег<small>EMBEDDEDAI / FINANCIAL INTELLIGENCE</small></span></a>
-    <div class="header-right"><div class="theme-control"><label for="theme-select">Тема</label><select id="theme-select" aria-label="Цветовая тема"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div><span id="dataset-badge" class="tag">Подключение…</span><button id="upload-open" class="button primary">＋ Загрузить данные</button></div></header>
+    <div class="header-right"><button id="assistant-open" class="text-button header-ai">✦ Спросить AI</button><div class="theme-control"><label for="theme-select">Тема</label><select id="theme-select" aria-label="Цветовая тема"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div><span id="dataset-badge" class="tag">Подключение…</span><button id="upload-open" class="button primary">＋ Загрузить данные</button></div></header>
   <main><div class="heading"><div><p class="eyebrow">АНАЛИТИКА ТРАНЗАКЦИОННОЙ СЕТИ</p><h1>Увидеть связи. Объяснить приоритет.</h1><p class="subtitle">От потока переводов — к обоснованной гипотезе для проверки.</p></div><div class="export-wrap"><label for="export-select">Выгрузить результат</label><select id="export-select"><option value="">Выберите файл ↓</option><option value="nodes_roles.csv">Все узлы и роли</option><option value="clusters.csv">Кластеры</option><option value="top_nodes.csv">Топ приоритетов</option><option value="report.html">Офлайн-отчёт HTML</option></select></div></div>
   <div id="alert" class="alert" role="status" hidden></div>
+  <section id="assistant-shell" class="assistant-shell" aria-label="AI-аналитик"></section>
   <section id="metrics" class="metrics" aria-label="Показатели набора"><div class="metric">Загрузка показателей…</div></section>
   <div class="context-strip"><span id="period">—</span><span id="runtime">—</span><button id="method-open" class="text-button">Как устроен расчёт ↗</button></div>
   <section class="workspace">
@@ -60,9 +62,9 @@ $("app").innerHTML = `
       <button id="reset" class="text-button">Сбросить фильтры</button>
       <div class="panel-heading list-heading"><h2>Приоритет проверки</h2><span class="tag small">TOP 50</span></div><div id="top-list" class="top-list" tabindex="0" role="region" aria-label="Приоритет проверки"></div>
     </aside>
-    <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button><button id="tab-queue" class="tab">Очередь</button><button id="tab-assistant" class="tab">AI-ассистент</button></div><div><button id="fit" class="icon-button" title="Вместить граф" disabled>⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
+    <section class="graph-panel"><div class="graph-toolbar"><div class="tabs"><button id="tab-graph" class="tab active">Карта связей</button><button id="tab-clusters" class="tab">Сообщества</button><button id="tab-analysis" class="tab">Проверки</button><button id="tab-queue" class="tab">Очередь</button></div><div><button id="fit" class="icon-button" title="Вместить граф" disabled>⊡</button><button id="full-graph" class="text-button">Весь граф</button></div></div>
       <div class="graph-options"><button id="community-map" class="text-button">Обзор сообществ</button><label for="color-mode">Цвет</label><select id="color-mode"><option value="role">По роли</option><option value="cluster">По сообществу</option></select><button id="graph-png" class="text-button" disabled>PNG ↓</button></div><div id="edge-info" class="edge-info" hidden></div><div id="graph-wrapper"><div id="graph" aria-label="Направленный граф транзакций"></div><div id="graph-empty" class="graph-empty" hidden>По этим фильтрам узлов нет</div><div class="graph-caption"><span id="graph-count" role="status">Загрузка графа…</span><span>Нажмите на узел, чтобы изучить связи</span></div></div>
-      <div id="clusters-view" tabindex="0" role="region" aria-label="Сообщества" hidden></div><div id="analysis-view" tabindex="0" role="region" aria-label="Проверки" hidden></div><div id="queue-view" tabindex="0" role="region" aria-label="Очередь проверки" hidden></div><div id="assistant-view" tabindex="0" role="region" aria-label="AI-ассистент" hidden></div>
+      <div id="clusters-view" tabindex="0" role="region" aria-label="Сообщества" hidden></div><div id="analysis-view" tabindex="0" role="region" aria-label="Проверки" hidden></div><div id="queue-view" tabindex="0" role="region" aria-label="Очередь проверки" hidden></div>
       <div id="graph-legend" class="legend">${Object.entries(labels)
         .map(([key, label]) => `<span><i style="background:${colors[key]}"></i>${label}</span>`)
         .join("")}<span class="legend-note">◆ seed · пунктир — граница наблюдения</span></div>
@@ -79,10 +81,14 @@ const queue = new InvestigationQueue(
   () => assistant?.updateContext(),
 );
 assistant = new AnalystAssistant(
-  () => (queue.selectedGids().length ? queue.selectedGids() : currentGid ? [currentGid] : []),
-  (gid) => selectNode(gid).catch(showError),
+  assistantContext,
+  async (gid) => {
+    await selectNode(gid).catch(showError);
+    $("detail").scrollIntoView({ block: "nearest", behavior: "auto" });
+  },
 );
-$("queue-ask").onclick = () => activateTab("assistant");
+$("queue-ask").onclick = () => assistant?.focus();
+$("assistant-open").onclick = () => assistant?.focus();
 const emptyDetail = $("detail").innerHTML;
 initializeTheme($<HTMLSelectElement>("theme-select"), () => {
   cy?.style(graphStyles(communityMode));
@@ -205,6 +211,7 @@ function clearFilterControls(keep = "") {
   for (const id of ["role", "cluster", "depth"])
     if (id !== keep) $<HTMLSelectElement>(id).value = "";
   $<HTMLInputElement>("seeds").checked = false;
+  assistant?.updateContext();
 }
 
 function resetOtherFilters(keep = "") {
@@ -294,6 +301,20 @@ function graphStyles(communities: boolean): StylesheetStyle[] {
       },
     },
   ];
+}
+
+function assistantContext(): AssistantContext {
+  return {
+    selected_gids: queue.selectedGids(),
+    active_gid: currentGid || null,
+    filters: {
+      role: $<HTMLSelectElement>("role").value || null,
+      cluster: $<HTMLSelectElement>("cluster").value ? Number($<HTMLSelectElement>("cluster").value) : null,
+      depth: $<HTMLSelectElement>("depth").value ? Number($<HTMLSelectElement>("depth").value) : null,
+      seeds: $<HTMLInputElement>("seeds").checked,
+    },
+    active_tab: activeTab,
+  };
 }
 
 function currentFilters(): URLSearchParams {
@@ -441,7 +462,7 @@ async function selectNode(gid: string, focusGraph = true, preserveTab = false) {
   $<HTMLInputElement>("gid").value = node.gid;
   if (!preserveTab) switchTab(false);
   $("detail").innerHTML =
-    `<div class="panel-heading"><h2>Карточка узла</h2><span class="tag small">#${node.rank}</span></div><p class="node-id gid">${node.gid}</p>${roleTag(node.role)}<div class="node-tags"><span>Уровень ${node.depth}</span><button id="node-cluster" class="text-button">Сообщество #${node.cluster_id} ↗</button>${node.is_seed ? '<span class="tag small">SEED</span>' : ""}</div><div class="score-grid"><div><strong>${percent(node.priority_score)}</strong><span>Приоритет проверки</span></div><div><strong>${percent(node.role_score)}</strong><span>Поддержка правила</span></div></div><p class="fine-print">Место при изменении весов ±20%: ${node.rank_range[0]}–${node.rank_range[1]}. Не доверительный интервал.</p><h3>Почему эта роль</h3><p class="evidence">${escapeHtml(node.evidence)}</p><button id="investigate-node" class="button primary full-width">Пути, циклы и хронология ↗</button><button id="download-dossier" class="text-button">Скачать справку по узлу ↓</button><dl class="node-metrics"><div><dt>Вход от других клиентов</dt><dd>${money(node.in_kzt)}</dd></div><div><dt>Выход другим клиентам</dt><dd>${money(node.out_kzt)}</dd></div><div><dt>Плательщики / получатели</dt><dd>${node.in_deg} / ${node.out_deg}</dd></div><div><dt>Переводы: вход / выход</dt><dd>${node.in_tx} / ${node.out_tx}</dd></div><div><dt>Seed-предков</dt><dd>${node.seed_reach}</dd></div>${node.self_transfer_tx ? `<div><dt>Самопереводы отдельно</dt><dd>${money(node.self_transfer_kzt)} · ${node.self_transfer_tx} пер.</dd></div>` : ""}</dl><details><summary>Вклад в приоритет и правила</summary>${Object.entries(
+    `<div class="panel-heading"><h2>Карточка узла</h2><span class="tag small">#${node.rank}</span></div><p class="node-id gid">${node.gid}</p>${roleTag(node.role)}<div class="node-tags"><span>Уровень ${node.depth}</span><button id="node-cluster" class="text-button">Сообщество #${node.cluster_id} ↗</button>${node.is_seed ? '<span class="tag small">SEED</span>' : ""}</div><div class="score-grid"><div><strong>${percent(node.priority_score)}</strong><span>Приоритет проверки</span></div><div><strong>${percent(node.role_score)}</strong><span>Поддержка правила</span></div></div><p class="fine-print">Место при изменении весов ±20%: ${node.rank_range[0]}–${node.rank_range[1]}. Не доверительный интервал.</p><h3>Почему эта роль</h3><p class="evidence">${escapeHtml(node.evidence)}</p><button id="investigate-node" class="button primary full-width">Пути, циклы и хронология ↗</button><button id="ask-node" class="text-button">✦ Обсудить узел с AI</button><button id="download-dossier" class="text-button">Скачать справку по узлу ↓</button><dl class="node-metrics"><div><dt>Вход от других клиентов</dt><dd>${money(node.in_kzt)}</dd></div><div><dt>Выход другим клиентам</dt><dd>${money(node.out_kzt)}</dd></div><div><dt>Плательщики / получатели</dt><dd>${node.in_deg} / ${node.out_deg}</dd></div><div><dt>Переводы: вход / выход</dt><dd>${node.in_tx} / ${node.out_tx}</dd></div><div><dt>Seed-предков</dt><dd>${node.seed_reach}</dd></div>${node.self_transfer_tx ? `<div><dt>Самопереводы отдельно</dt><dd>${money(node.self_transfer_kzt)} · ${node.self_transfer_tx} пер.</dd></div>` : ""}</dl><details><summary>Вклад в приоритет и правила</summary>${Object.entries(
       node.priority_parts,
     )
       .map(
@@ -455,6 +476,7 @@ async function selectNode(gid: string, focusGraph = true, preserveTab = false) {
   $("investigate-node").onclick = () => {
     void openInvestigation(runId, node, (gid) => selectNode(gid).catch(showError));
   };
+  $("ask-node").onclick = () => assistant?.focus("Что важно проверить у этого узла?");
   $("download-dossier").onclick = () => downloadDossier(node, currentReport);
   $("focus-neighbors").onclick = () => {
     clearFilterControls();
@@ -477,12 +499,12 @@ async function selectNode(gid: string, focusGraph = true, preserveTab = false) {
 }
 function activateTab(tab: string) {
   activeTab = tab;
-  for (const name of ["graph", "clusters", "analysis", "queue", "assistant"]) {
+  for (const name of ["graph", "clusters", "analysis", "queue"]) {
     $(name === "graph" ? "graph-wrapper" : `${name}-view`).hidden = name !== tab;
     $(`tab-${name}`).classList.toggle("active", name === tab);
   }
   if (tab === "graph") cy?.resize();
-  if (tab === "assistant") assistant?.updateContext();
+  assistant?.updateContext();
 }
 function switchTab(clusters: boolean) {
   activateTab(clusters ? "clusters" : "graph");
@@ -490,7 +512,6 @@ function switchTab(clusters: boolean) {
 $("investigation-close").onclick = () => $<HTMLDialogElement>("investigation-dialog").close();
 $("tab-analysis").onclick = () => activateTab("analysis");
 $("tab-queue").onclick = () => activateTab("queue");
-$("tab-assistant").onclick = () => activateTab("assistant");
 $("tab-graph").onclick = () => switchTab(false);
 $("tab-clusters").onclick = () => switchTab(true);
 $("community-map").onclick = () => {
