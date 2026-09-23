@@ -72,6 +72,8 @@ SKIP_DIRS = {
     ".next",
     ".idea",
     ".vscode",
+    ".ssh",
+    ".aws",
 }
 SUFFIXES = {
     ".py",
@@ -115,7 +117,7 @@ def _regular(root: Path, relative: str) -> Path:
     path = root / relative
     if any(part.is_symlink() for part in (path, *path.parents) if part != root.parent):
         raise PackageError(f"Обязательный файл не должен быть символической ссылкой: {relative}")
-    if not path.is_file():
+    if not path.is_file() or path.stat().st_size == 0:
         raise PackageError(f"Отсутствует обязательный файл: {relative}")
     return path
 
@@ -137,7 +139,11 @@ def _tree(path: Path) -> list[Path]:
         if child.is_symlink():
             continue
         if child.is_dir():
-            if child.name not in SKIP_DIRS and not child.name.endswith(".egg-info"):
+            if (
+                child.name.lower() not in SKIP_DIRS
+                and not child.name.endswith(".egg-info")
+                and not child.name.startswith(".env")
+            ):
                 files.extend(_tree(child))
         elif child.is_file():
             if _sensitive(child):
@@ -253,6 +259,15 @@ def package_submission(root: Path, destination: Path | None = None) -> dict[str,
     if any(parent.is_symlink() for parent in destination.parents):
         raise PackageError("Выходной каталог не должен проходить через символическую ссылку")
     files, validation = _inputs(root)
+    folded = set()
+    for name in files:
+        if "\\" in name or ":" in name or any(ord(char) < 32 for char in name):
+            raise PackageError("Имя файла несовместимо с безопасной распаковкой на Windows")
+        if name.casefold() in folded:
+            raise PackageError(
+                "Имена файлов различаются только регистром; распаковка на Windows неоднозначна"
+            )
+        folded.add(name.casefold())
     if any(path.resolve() == destination for path in files.values()):
         raise PackageError("Архив не должен заменять входной файл")
     provenance = _git(root)
