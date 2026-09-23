@@ -1463,3 +1463,200 @@ textarea:focus-visible {
   padding: 5px 8px;
   font-size: 10px;
 }
+
+/* The AI entry point belongs to the whole dataset, outside workspace tabs. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.header-ai {
+  color: var(--header-accent);
+  white-space: nowrap;
+}
+.assistant-shell {
+  margin: 0 0 18px;
+  padding: 15px 18px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-line);
+  border-radius: 9px;
+  background: var(--surface);
+  scroll-margin-top: 12px;
+  min-width: 0;
+}
+.assistant-heading,
+.assistant-heading > div,
+.assistant-context-row,
+.assistant-settings-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.assistant-heading {
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+.assistant-shell .assistant-heading h2 {
+  font-size: 14px;
+  margin: 0;
+}
+.assistant-spark {
+  color: var(--accent);
+  font-size: 20px;
+}
+.assistant-composer {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+#assistant-question {
+  flex: 1;
+  min-width: 0;
+  min-height: 47px;
+  max-height: 140px;
+  height: 47px;
+  line-height: 23px;
+  font-size: 13px;
+}
+.assistant-composer .button {
+  align-self: flex-start;
+  min-height: 47px;
+  white-space: nowrap;
+}
+.assistant-context-row {
+  justify-content: space-between;
+  margin: 7px 0 0;
+}
+#assistant-context {
+  margin: 0;
+  flex: 1;
+}
+.assistant-examples {
+  margin: 8px 0 0;
+  gap: 6px 14px;
+}
+.assistant-examples button {
+  font-size: 11px;
+}
+.assistant-settings-row {
+  margin-top: 8px;
+  font-size: 10px;
+  align-items: flex-start;
+}
+#assistant-status {
+  margin: 0;
+  flex: 1 1 230px;
+  font-size: 10px;
+}
+.assistant-settings-row details {
+  padding: 0;
+  border: 0;
+  margin: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+.assistant-settings-row summary {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.assistant-settings-row details[open] {
+  flex: 1 1 100%;
+}
+.assistant-disclosure {
+  margin: 6px 0 0;
+  max-width: 1000px;
+}
+#assistant-access label {
+  display: block;
+  margin: 8px 0 5px;
+}
+#assistant-view {
+  position: relative;
+  max-height: min(490px, 62vh);
+  flex: none;
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding: 0 12px 0 0;
+  overscroll-behavior: contain;
+}
+.assistant-answer {
+  padding: 14px 0;
+  margin-top: 0;
+}
+.assistant-answer:first-child {
+  border-top: 0;
+}
+.assistant-answer p {
+  font-size: 12px;
+}
+.assistant-answer-text {
+  line-height: 1.8;
+}
+.assistant-question-echo strong {
+  color: var(--accent);
+}
+.assistant-answer .assistant-question-echo {
+  font-size: 11px;
+  margin: 0 0 12px;
+}
+.assistant-answer details {
+  font-size: 11px;
+}
+.assistant-progress {
+  padding: 18px 0;
+  color: var(--text-muted);
+}
+@media (max-width: 650px) {
+  .assistant-shell {
+    padding: 12px;
+  }
+  .assistant-heading > div {
+    gap: 6px;
+  }
+  .assistant-heading .tag {
+    display: none;
+  }
+  .assistant-composer {
+    flex-wrap: wrap;
+  }
+  #assistant-question {
+    flex-basis: 100%;
+    min-height: 68px;
+    height: 68px;
+  }
+  .assistant-composer .button {
+    min-height: 39px;
+  }
+  #assistant-view {
+    max-height: 60vh;
+    padding-right: 7px;
+  }
+}
+.assistant-answer .assistant-answer-label {
+  color: var(--accent);
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+.assistant-navigation,
+.assistant-followups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 12px 0;
+}
+.assistant-followups > .fine-print {
+  width: 100%;
+}
+.assistant-followups button {
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}

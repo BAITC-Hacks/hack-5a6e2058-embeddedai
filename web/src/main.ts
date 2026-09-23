@@ -86,6 +86,10 @@ assistant = new AnalystAssistant(
     await selectNode(gid).catch(showError);
     $("detail").scrollIntoView({ block: "nearest", behavior: "auto" });
   },
+  (view) => {
+    activateTab(view);
+    $("graph-wrapper").parentElement?.scrollIntoView({ block: "nearest", behavior: "auto" });
+  },
 );
 $("queue-ask").onclick = () => assistant?.focus();
 $("assistant-open").onclick = () => assistant?.focus();
@@ -309,8 +313,12 @@ function assistantContext(): AssistantContext {
     active_gid: currentGid || null,
     filters: {
       role: $<HTMLSelectElement>("role").value || null,
-      cluster: $<HTMLSelectElement>("cluster").value ? Number($<HTMLSelectElement>("cluster").value) : null,
-      depth: $<HTMLSelectElement>("depth").value ? Number($<HTMLSelectElement>("depth").value) : null,
+      cluster: $<HTMLSelectElement>("cluster").value
+        ? Number($<HTMLSelectElement>("cluster").value)
+        : null,
+      depth: $<HTMLSelectElement>("depth").value
+        ? Number($<HTMLSelectElement>("depth").value)
+        : null,
       seeds: $<HTMLInputElement>("seeds").checked,
     },
     active_tab: activeTab,

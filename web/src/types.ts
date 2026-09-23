@@ -206,6 +206,12 @@ export interface AssistantContext {
   filters: { role: string | null; cluster: number | null; depth: number | null; seeds: boolean };
   active_tab: string;
 }
+export interface AssistantAction {
+  type: "focus_node" | "show_view";
+  label: string;
+  gid: string | null;
+  view: "graph" | "queue" | "analysis" | "clusters" | null;
+}
 export interface AssistantResponse {
   answer: string;
   claims: { text: string; gids: string[] }[];
@@ -215,6 +221,9 @@ export interface AssistantResponse {
   model: string;
   usage: unknown;
   query: unknown;
+  conversation_id?: string;
+  followups?: string[];
+  actions?: AssistantAction[];
 }
 export interface RobustnessNode {
   gid: string;

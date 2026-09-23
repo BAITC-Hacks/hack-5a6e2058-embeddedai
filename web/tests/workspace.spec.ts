@@ -79,14 +79,15 @@ test("AI uses selected string gids and session-only access code, escapes output 
   await page.locator("#queue-ask").click();
   await expect(page.locator("#assistant-view")).toBeVisible();
   await expect(page.locator("#assistant-context")).toContainText("2 узл.");
-  await expect(page.locator(".assistant-disclosure")).toContainText("Таблицы графа остаются на сервере");
+  await expect(page.locator(".assistant-disclosure")).toContainText("Исходные файлы и локальные заметки не отправляются");
   await page.locator("#assistant-question").fill("Кто собирает деньги с этих двоих?");
+  await page.locator("#assistant-access summary").click();
   await page.locator("#assistant-token").fill("test-access-code");
   await page.locator("#assistant-send").click();
   await expect(page.locator(".assistant-answer-text")).toContainText("<img src=x");
   await expect(page.locator(".assistant-answer-text")).toBeInViewport();
   await expect(page.locator("#assistant-result img")).toHaveCount(0);
-  expect(payload).toEqual({ question: "Кто собирает деньги с этих двоих?", selected_gids: chosen });
+  expect(payload).toMatchObject({ question: "Кто собирает деньги с этих двоих?", selected_gids: chosen, conversation_id: null, context: {active_tab: "queue"} });
   expect(sentToken).toBe("test-access-code");
   await expect(page.locator(".assistant-paths")).toContainText("3 пер.");
   await expect(page.locator(".assistant-paths [data-assistant-gid]")).toHaveCount(3);
@@ -98,7 +99,7 @@ test("AI uses selected string gids and session-only access code, escapes output 
   await expect(page.locator(".node-id")).toHaveText(chosen[0]);
   await expect(page.locator("#graph-wrapper")).toBeVisible();
   await page.reload();
-  await page.locator("#tab-assistant").click();
+  await page.locator("#assistant-open").click();
   await expect(page.locator("#assistant-token")).toHaveValue("");
 });
 
@@ -117,7 +118,7 @@ test("AI cancellation ignores a late response and API failure stays an actionabl
   });
   await page.goto("/");
   await expect(page.locator(".node-id")).toBeVisible();
-  await page.locator("#tab-assistant").click();
+  await page.locator("#assistant-open").click();
   await page.locator("#assistant-question").fill("Покажи входящие связи");
   await page.locator("#assistant-send").click();
   await requested.promise;
@@ -136,7 +137,7 @@ test("AI is optional and unavailable status does not block graph or queue", asyn
   await page.route("**/api/assistant/status", (route) => route.fulfill({ json: { enabled: false, model: "test-model", reason: "Ключ не настроен" } }));
   await page.goto("/");
   await expect(page.locator(".node-id")).toBeVisible();
-  await page.locator("#tab-assistant").click();
+  await page.locator("#assistant-open").click();
   await expect(page.locator("#assistant-status")).toContainText("Ключ не настроен");
   await expect(page.locator("#assistant-send")).toBeDisabled();
   await page.setViewportSize({ width: 390, height: 844 });

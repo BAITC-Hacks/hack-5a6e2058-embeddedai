@@ -134,11 +134,13 @@ test("a long AI answer remains scrollable through its final limitation without m
   await page.goto("/");
   await expect(page.locator(".node-id")).toBeVisible();
   const initial = await dimensions(page);
-  await page.locator("#tab-assistant").click();
+  await page.locator("#assistant-open").click();
   await page.locator("#assistant-question").fill("Покажи подробный профиль узла");
   await page.locator("#assistant-send").click();
   await expect(page.locator(".assistant-answer-text")).toContainText("Наблюдение 40");
   const region = page.locator("#assistant-view");
+  await page.locator(".assistant-limitations summary").click();
+  await region.evaluate(element => {element.scrollTop = 0;});
   await wheelRegion(page, region);
   await keyboardEnd(page, region);
   await pointerTarget(page.getByText("Последнее ограничение тестового ответа.", { exact: true }));
